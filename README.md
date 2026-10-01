@@ -28,7 +28,7 @@ Check an export locally before uploading it. The checker prints row numbers and 
 npm run roster:check -- /path/to/eligible-members.csv
 ```
 
-For a new deployment, an operator with private host access can import the first roster directly into the persistent database with `node scripts/import-initial-roster.js /path/to/eligible-members.csv EXPECTED_COUNT` inside the application container. It refuses to replace an existing roster; use `/roster replace` for later updates. Remove the temporary CSV from the host and container after import.
+For a new deployment, an operator with private host access can import the first roster directly into the persistent database with `node scripts/import-initial-roster.js /path/to/eligible-members.csv EXPECTED_COUNT` inside the application container. It refuses to replace an existing roster; use `/upload` for later updates. Remove the temporary CSV from the host and container after import.
 
 ## Run locally
 
@@ -43,7 +43,7 @@ Supply the required environment variables before `npm start`. There is deliberat
 ## Admin workflow
 
 1. Use `/testmail` to confirm delivery to a controlled inbox. Check junk as well as SMTP acceptance.
-2. Use `/roster replace` with a CSV containing **only currently eligible email addresses and their roles**. This atomically replaces the active roster, invalidates pending codes, updates roles for existing verified accounts, and attempts to remove roles the bot granted to removed members. Review the reported failures. Existing role assignments made outside the bot are preserved.
+2. Download the current roster tab as CSV, then use the admin-only `/upload` command and attach it as `csv`. The file must contain **every currently eligible email address and its role**: uploading replaces the entire active roster rather than merging rows. `/roster replace` performs the same action. A valid upload invalidates pending codes, updates roles for existing verified accounts, and attempts to remove roles the bot granted to removed members. Review the reported failures. Existing role assignments made outside the bot are preserved.
 3. Use `/roster status` to check the active version, row count, and unreconciled removals. Use `/roster reconcile` until the unreconciled count is zero.
    Use `/roster audit` to review recent roster replacements and account transfers.
    Reconciliation revisits removed claims, updates active claims after roster role changes, and retries role changes that failed. It does not remove roles assigned outside this bot.

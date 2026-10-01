@@ -24,6 +24,7 @@ The complete source of the running bot is public at [TheTexta/tvm-discord-email-
 4. If the email is active, send a six-digit code to that same address. Bind its HMAC to the Discord account, server, email, and roster version. Expire it after 15 minutes and allow at most five attempts.
 5. Recheck the active roster and account claim before granting General Member and the matching Exec or Admin role. One roster email can be claimed by one Discord account, and one account can claim one roster email. Only administrators can release or transfer claims.
 6. On roster replacement, invalidate pending codes and sync roles for active claims. Revoke a role only when the bot granted it for a removed or downgraded claim. Existing role assignments made outside this bot remain intact. Reconcile failed bot-managed role changes at startup and hourly.
+7. Administrators can upload a complete replacement CSV with `/upload`; `/roster replace` uses the same validation and update path. Google Sheet edits require an upload until an authenticated sheet sync is configured.
 
 ## Deployment and rollout
 

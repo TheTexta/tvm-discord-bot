@@ -50,12 +50,15 @@ const commands = [
     new SlashCommandBuilder().setName('testmail').setDescription('Send a test email through Resend')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addStringOption(o => o.setName('email').setDescription('Destination email').setRequired(true)),
+    new SlashCommandBuilder().setName('upload').setDescription('Upload a CSV to update the TVM roster and roles')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addAttachmentOption(o => o.setName('csv').setDescription('CSV with Email and Role columns').setRequired(true)),
     new SlashCommandBuilder().setName('roster').setDescription('Manage the TVM membership roster')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addSubcommand(s => s.setName('status').setDescription('Show active roster status'))
         .addSubcommand(s => s.setName('audit').setDescription('Show recent roster and transfer actions'))
         .addSubcommand(s => s.setName('replace').setDescription('Replace the entire active roster from a CSV')
-            .addAttachmentOption(o => o.setName('csv').setDescription('CSV with an Email column').setRequired(true)))
+            .addAttachmentOption(o => o.setName('csv').setDescription('CSV with Email and Role columns').setRequired(true)))
         .addSubcommand(s => s.setName('reconcile').setDescription('Remove the role from members no longer in the roster'))
         .addSubcommand(s => s.setName('repair').setDescription('Restore the member role for an active roster claim')
             .addStringOption(o => o.setName('email').setDescription('Roster email').setRequired(true)))
@@ -232,6 +235,20 @@ async function reconcile(guild) {
     return { revoked, failed }
 }
 
+async function uploadRoster(interaction) {
+    const attachment = interaction.options.getAttachment('csv')
+    if (!attachment || attachment.size > 2 * 1024 * 1024) throw new Error('CSV must be 2 MiB or smaller')
+    const response = await fetch(attachment.url, { signal: AbortSignal.timeout(15000) })
+    if (!response.ok) throw new Error('Could not download the CSV attachment')
+    const rows = parseRoster(await response.text())
+    const outcome = await withMembershipLock(async () => {
+        const imported = await store.replaceRoster(config.guildId, rows, interaction.user.id)
+        const reconciliation = await reconcile(interaction.guild)
+        return { ...imported, ...reconciliation }
+    })
+    await privateReply(interaction, `Roster version ${outcome.version} activated with ${outcome.count} members. Roles revoked: ${outcome.revoked}. Claims requiring role sync retry: ${outcome.failed}.`)
+}
+
 async function handleRoster(interaction) {
     const subcommand = interaction.options.getSubcommand()
     await interaction.deferReply({ flags: MessageFlags.Ephemeral })
@@ -250,18 +267,7 @@ async function handleRoster(interaction) {
         return
     }
     if (subcommand === 'replace') {
-        const attachment = interaction.options.getAttachment('csv')
-        if (!attachment || attachment.size > 2 * 1024 * 1024) throw new Error('CSV must be 2 MiB or smaller')
-        const response = await fetch(attachment.url, { signal: AbortSignal.timeout(15000) })
-        if (!response.ok) throw new Error('Could not download the CSV attachment')
-        const csv = await response.text()
-        const rows = parseRoster(csv)
-        const outcome = await withMembershipLock(async () => {
-            const imported = await store.replaceRoster(config.guildId, rows, interaction.user.id)
-            const reconciliation = await reconcile(interaction.guild)
-            return { ...imported, ...reconciliation }
-        })
-        await privateReply(interaction, `Roster version ${outcome.version} activated with ${outcome.count} members. Roles revoked: ${outcome.revoked}. Claims requiring role sync retry: ${outcome.failed}.`)
+        await uploadRoster(interaction)
         return
     }
     if (subcommand === 'reconcile') {
@@ -391,6 +397,10 @@ client.on('interactionCreate', async interaction => {
         if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
             await interaction.reply({ content: 'Administrator permission required.', flags: MessageFlags.Ephemeral })
             return
+        }
+        if (interaction.commandName === 'upload') {
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+            return await uploadRoster(interaction)
         }
         if (interaction.commandName === 'roster') return await handleRoster(interaction)
         if (interaction.commandName === 'postverify') {
