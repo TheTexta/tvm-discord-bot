@@ -11,10 +11,10 @@ The complete source of the running bot is public at [TheTexta/tvm-discord-email-
 - The email-only TVM runtime, roster parser, claim database, administrator commands, Resend SMTP integration, Dockerfile, Compose example, and local tests are implemented. The original EmailVerify code remains in the repository but is not the running entry point.
 - Discord credentials work. The bot has joined the TVM server; Server Members Intent, role hierarchy, Manage Roles, and private alert-channel access pass `npm run discord:check`.
 - Cloudflare serves the sending domain's DKIM and return-path records. Resend SMTP accepted a message from `verify@tvm.dextery.dev` to its delivery test address. Confirm the domain's `Verified` status in Resend and test a real controlled inbox before inviting members.
-- A Coolify Dockerfile application has been built with a dedicated read-only GitHub deploy key, runtime secrets, and a persistent mount at `/usr/app/config`. The email-based Discord commands were registered. The app is temporarily stopped while a role-ownership correction is deployed.
+- A Coolify Dockerfile application is running with a dedicated read-only GitHub deploy key, runtime secrets, and a persistent mount at `/usr/app/config`. The email-based Discord commands are registered.
 - The F26 master file has 103 data rows. An email-only roster with 102 unique addresses was imported as version 1. It includes the 12 rows without student numbers and excludes row 74's alternate email, following TVM's earlier choice of row 15's email. The CSV remains outside Git and was removed from the container after import.
-- An encrypted copy of the SQLite database was saved off server and decrypted into a temporary file to check integrity, roster count, and version.
-- Initial reconciliation affected existing `General Member` assignments. Those role assignments were restored from Discord's audit trail. The corrected runtime tracks whether the bot granted each role and preserves pre-existing assignments; validate this behavior on restart before opening verification to members.
+- An encrypted copy of the current SQLite database was saved off server and decrypted into a temporary file to check integrity, roster count, version, and the role-ownership schema.
+- Initial reconciliation affected existing `General Member` assignments. Every affected assignment was restored from Discord's audit trail and confirmed present after deploying the corrected runtime. The bot now tracks whether it granted each role and preserves pre-existing assignments.
 
 ## Membership and verification rules
 
@@ -29,8 +29,8 @@ The complete source of the running bot is public at [TheTexta/tvm-discord-email-
 
 1. Run `npm test`, `npm run roster:check -- /path/to/eligible-emails.csv`, and `npm run discord:check`. Keep the roster CSV outside Git.
 2. Confirm Resend shows `tvm.dextery.dev` as verified, then send `/testmail` to a controlled inbox and check delivery and junk placement. Keep click and open tracking disabled for codes. [Resend domain guide](https://resend.com/docs/add-a-domain)
-3. Deploy the corrected Coolify app from the public repository. Keep one replica and no public HTTP route. Persist the SQLite database at `/usr/app/config/tvm.db` and continue encrypted off-server backups. [Coolify persistent storage](https://coolify.io/docs/core/persistent-storage/storage-mounts/overview)
-4. Verify existing `General Member` assignments survive startup. Pilot with administrators and a small set of roster addresses. Run `/roster status` and `/roster reconcile` until there are no outstanding bot-managed revocations.
+3. Keep one Coolify replica and no public HTTP route. Persist the SQLite database at `/usr/app/config/tvm.db` and continue encrypted off-server backups. [Coolify persistent storage](https://coolify.io/docs/core/persistent-storage/storage-mounts/overview)
+4. Pilot with administrators and a small set of roster addresses. Run `/roster status` and `/roster reconcile` until there are no outstanding bot-managed revocations.
 5. Post the verification button in the unverified channel. Test with a normal Discord account that valid roster email plus code grants `General Member`, while an absent email, wrong code, or already claimed email does not. Test that unverified members cannot access member channels.
 6. Verify restart and redeploy preserve roster and claims. Confirm `/source` opens without a GitHub login. Monitor Coolify logs and the private administrator alert channel.
 
@@ -42,7 +42,7 @@ The complete source of the running bot is public at [TheTexta/tvm-discord-email-
 | Email absent from roster | No code sent and no role granted; generic private response |
 | Wrong, expired, reused, or stale-version code | Rejected |
 | Second Discord account uses a claimed email | Administrator transfer required |
-| Member email removed from roster | Claim becomes inactive and role is revoked |
+| Member email removed from roster | Claim becomes inactive; a role granted by the bot is revoked |
 | Invalid or empty roster replacement | Previous active roster remains intact |
 | SMTP or Discord role error | No false success; administrator alerted |
 | Restart, redeploy, and backup restore | Roster and claims remain consistent |
