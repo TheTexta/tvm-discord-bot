@@ -59,6 +59,6 @@ The bot stores the roster in SQLite after import; the uploaded CSV does not need
 
 ## Coolify deployment
 
-Deploy this repository as a Docker Compose application using [docker-compose.yml](docker-compose.yml). Configure all required environment variables as secrets. Keep one replica: SQLite and the in-process membership lock are designed for one bot process. The named `tvm_data` volume persists `/usr/app/config/tvm.db` across redeployments. No public port or HTTP route is needed. Back up this volume off server and monitor logs and the private alert channel.
+Deploy this repository as a Coolify Dockerfile application, or as a Docker Compose application using [docker-compose.yml](docker-compose.yml). For a Dockerfile application, attach persistent storage at `/usr/app/config` before the first deployment. For Compose, the named `tvm_data` volume provides that mount. Configure all required environment variables as runtime secrets. Keep one replica: SQLite and the in-process membership lock are designed for one bot process. The database is `/usr/app/config/tvm.db`. No public port or HTTP route is needed. Back up the volume off server and monitor logs and the private alert channel.
 
 Before production rollout, verify the current Resend sending allowance and stage member invitations accordingly. Production smoke tests require real Discord, Resend, DNS, roster, and Coolify access; none are included in this repository.
