@@ -20,7 +20,7 @@ Set the bot's role above all three configured roles and grant it Manage Roles, V
 
 After filling `.env.local` locally, run `npm run discord:check` to check the application, member intent, server installation, role hierarchy, and alert-channel access without printing credentials. This check makes no Discord changes. It does not test mail delivery.
 
-The roster CSV must contain `Email` and `Role` headers. **Export only eligible members.** Accepted roles are `GM`, `Exec - Editor`, `Exec - Producer`, and `Admin` (`Exec: Editor` and `Exec: Producer` also work). Other columns, including `Student ID`, are ignored; rows with blank student numbers can verify. Workshop/training fields do not change eligibility. Emails are trimmed and compared without case. A replacement is rejected if it is empty, malformed, has duplicate emails or roles, or exceeds 2 MiB or 10,000 rows. Invalid replacements leave the active roster unchanged.
+The roster CSV must contain `Email` and `Role` headers. **Include only eligible members in new rows.** Accepted roles are `GM`, `Exec - Editor`, `Exec - Producer`, and `Admin` (`Exec: Editor` and `Exec: Producer` also work). Other columns, including `Student ID`, are ignored; rows with blank student numbers can verify. Workshop/training fields do not change eligibility. Emails are trimmed and compared without case. An upload is rejected if it is empty, malformed, has duplicate emails or unknown roles, or exceeds 2 MiB or 10,000 rows. Invalid uploads leave the active roster unchanged.
 
 Check an export locally before uploading it. The checker prints row numbers and issue types without printing email addresses:
 
@@ -28,7 +28,7 @@ Check an export locally before uploading it. The checker prints row numbers and 
 npm run roster:check -- /path/to/eligible-members.csv
 ```
 
-For a new deployment, an operator with private host access can import the first roster directly into the persistent database with `node scripts/import-initial-roster.js /path/to/eligible-members.csv EXPECTED_COUNT` inside the application container. It refuses to replace an existing roster; use `/upload` for later updates. Remove the temporary CSV from the host and container after import.
+For a new deployment, an operator with private host access can import the first roster directly into the persistent database with `node scripts/import-initial-roster.js /path/to/eligible-members.csv EXPECTED_COUNT` inside the application container. It refuses to replace an existing roster; use `/upload` to add or update entries later. Remove the temporary CSV from the host and container after import.
 
 ## Run locally
 
@@ -43,16 +43,15 @@ Supply the required environment variables before `npm start`. There is deliberat
 ## Admin workflow
 
 1. Use `/testmail` to confirm delivery to a controlled inbox. Check junk as well as SMTP acceptance.
-2. Download the current roster tab as CSV, then use the admin-only `/upload` command and attach it as `csv`. The file must contain **every currently eligible email address and its role**: uploading replaces the entire active roster rather than merging rows. `/roster replace` performs the same action. A valid upload invalidates pending codes, updates roles for existing verified accounts, and attempts to remove roles the bot granted to removed members. Review the reported failures. Existing role assignments made outside the bot are preserved.
-3. Use `/roster status` to check the active version, row count, and unreconciled removals. Use `/roster reconcile` until the unreconciled count is zero.
-   Use `/roster audit` to review recent roster replacements and account transfers.
-   Reconciliation revisits removed claims, updates active claims after roster role changes, and retries role changes that failed. It does not remove roles assigned outside this bot.
+2. Download the current roster tab as CSV, then use the admin-only `/upload` command and attach it as `csv`. Uploading **adds new emails and updates roles for included emails**. Emails omitted from the CSV stay active, so an incomplete sheet does not remove anyone. Existing Discord roles are preserved; eligible new roles are granted to verified accounts. A valid upload invalidates pending codes. Review any reported role-sync failures.
+3. Use `/roster status` to check the active version and row count. Use `/roster reconcile` to retry missing role grants, and `/roster audit` to review recent uploads and account transfers.
+   Reconciliation updates active claims and retries missing role grants. Automatic role revocation is disabled while TVM's roster is incomplete; it can be enabled later with `TVM_AUTO_ROLE_REVOCATION=true` after a complete roster and a reviewed replacement process are in place. `/roster release` and `/roster transfer` remain explicit administrator actions that can remove bot-managed roles.
 4. Use `/postverify` in the unverified members' channel. Use a normal account to test that member channels require the configured membership role.
 5. Use `/roster transfer` when a verified member changes Discord accounts. Both accounts must be in the server, and the target must not already claim another roster entry.
 6. If Discord could not confirm a role assignment, use `/roster repair` with that email's active claim after checking the bot's permissions.
 7. Use `/roster release` to remove a role and unlink a claim when a member requests deletion or an erroneous claim must be cleared. The member can verify again while still in the active roster.
 
-Pending codes expire after 15 minutes and are swept hourly. Request events are kept for at most an hour, sending events for at most a day, and administrator audit entries for up to one year. Active roster entries and claims remain until a roster replacement, revocation, transfer, or release changes them. Database backups may retain older copies until the backup retention period ends.
+Pending codes expire after 15 minutes and are swept hourly. Request events are kept for at most an hour, sending events for at most a day, and administrator audit entries for up to one year. Active roster entries and claims remain until a deliberate removal, transfer, or release changes them. Database backups may retain older copies until the backup retention period ends.
 
 The bot stores the roster in SQLite after import; the uploaded CSV does not need a separate persistent mount. Back up the **entire** `tvm.db` database with SQLite's backup API or `sqlite3 .backup`, and keep an encrypted copy off the Coolify server. Test a restore before rollout. A volume is persistence, not a backup. Keep the old sender domain and key available until a replacement sender passes `/testmail`; then update `SMTP_FROM` and `RESEND_API_KEY` and redeploy. Rotate the Discord token and verification secret through Coolify; changing the latter invalidates pending codes.
 

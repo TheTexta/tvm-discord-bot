@@ -157,3 +157,32 @@ test('roster replacement invalidates pending codes and send limits apply', async
         fs.rmSync(dir, { recursive: true, force: true })
     }
 })
+
+test('roster uploads preserve omitted members and existing claims while adding roles', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvm-store-'))
+    const store = new Store(path.join(dir, 'tvm.db'), 'g'.repeat(32))
+    const guild = '123456789012345678'
+    try {
+        await store.replaceRoster(guild, [
+            { email: 'existing@example.org', role: 'gm' },
+            { email: 'omitted@example.org', role: 'gm' }
+        ], 'admin')
+        await store.savePending(guild, 'user-a', 'omitted@example.org', '123456')
+        await store.verifyAndClaim(guild, 'user-a', '123456')
+        const result = await store.mergeRoster(guild, [
+            { email: 'existing@example.org', role: 'exec' },
+            { email: 'new@example.org', role: 'admin' }
+        ], 'admin')
+        assert.deepEqual(result, { version: 2, uploaded: 2, count: 3 })
+        assert.equal((await store.lookup(guild, 'omitted@example.org')).role, 'gm')
+        assert.equal((await store.lookup(guild, 'existing@example.org')).role, 'exec')
+        assert.equal((await store.lookup(guild, 'new@example.org')).role, 'admin')
+        assert.equal((await store.claimFor(guild, 'omitted@example.org')).user_id, 'user-a')
+        assert.deepEqual(await store.removedClaims(guild), [])
+        await assert.rejects(store.mergeRoster(guild, [{ email: 'bad@example.org', role: 'owner' }], 'admin'), /invalid role/)
+        assert.equal((await store.status(guild)).count, 3)
+    } finally {
+        await store.close()
+        fs.rmSync(dir, { recursive: true, force: true })
+    }
+})

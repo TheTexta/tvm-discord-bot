@@ -119,6 +119,38 @@ class Store {
         })
     }
 
+    mergeRoster(guildId, rows, adminId) {
+        return this._locked(async () => {
+            if (!Array.isArray(rows) || rows.length === 0) throw new Error('Roster cannot be empty')
+            if (rows.length > 10000) throw new Error('Roster exceeds 10,000 rows')
+            const emails = rows.map(row => normalizeEmail(row?.email))
+            if (emails.some(email => !validEmail(email))) throw new Error('Roster contains an invalid email')
+            if (new Set(emails).size !== emails.length) throw new Error('Roster contains duplicate emails')
+            if (rows.some(row => !['gm', 'exec', 'admin'].includes(row?.role))) throw new Error('Roster contains an invalid role')
+            await this._exec('BEGIN IMMEDIATE')
+            try {
+                const previous = await this._get('SELECT version FROM email_roster_meta WHERE guild_id = ?', [guildId])
+                for (let i = 0; i < rows.length; i++) {
+                    await this._run(`INSERT INTO email_roster (guild_id, email, role) VALUES (?, ?, ?)
+                        ON CONFLICT(guild_id, email) DO UPDATE SET role=excluded.role`, [guildId, emails[i], rows[i].role])
+                }
+                await this._run('DELETE FROM email_pending WHERE guild_id = ?', [guildId])
+                const version = (previous?.version || 0) + 1
+                await this._run(`INSERT INTO email_roster_meta (guild_id, version, updated_at, updated_by) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(guild_id) DO UPDATE SET version=excluded.version, updated_at=excluded.updated_at, updated_by=excluded.updated_by`,
+                    [guildId, version, Date.now(), adminId])
+                const count = (await this._get('SELECT COUNT(*) AS count FROM email_roster WHERE guild_id = ?', [guildId])).count
+                await this._run('INSERT INTO email_admin_audit VALUES (?, ?, ?, ?, ?)',
+                    [guildId, adminId, 'roster_merge', JSON.stringify({ version, uploaded: rows.length, count }), Date.now()])
+                await this._exec('COMMIT')
+                return { version, uploaded: rows.length, count }
+            } catch (error) {
+                await this._exec('ROLLBACK').catch(() => {})
+                throw error
+            }
+        })
+    }
+
     allowRequest(guildId, userId, email) {
         return this._locked(async () => {
             const emailKey = this._emailKey(normalizeEmail(email))

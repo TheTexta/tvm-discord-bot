@@ -57,9 +57,7 @@ const commands = [
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addSubcommand(s => s.setName('status').setDescription('Show active roster status'))
         .addSubcommand(s => s.setName('audit').setDescription('Show recent roster and transfer actions'))
-        .addSubcommand(s => s.setName('replace').setDescription('Replace the entire active roster from a CSV')
-            .addAttachmentOption(o => o.setName('csv').setDescription('CSV with Email and Role columns').setRequired(true)))
-        .addSubcommand(s => s.setName('reconcile').setDescription('Remove the role from members no longer in the roster'))
+        .addSubcommand(s => s.setName('reconcile').setDescription('Sync roles for verified roster members'))
         .addSubcommand(s => s.setName('repair').setDescription('Restore the member role for an active roster claim')
             .addStringOption(o => o.setName('email').setDescription('Roster email').setRequired(true)))
         .addSubcommand(s => s.setName('release').setDescription('Remove a member role and unlink its roster claim')
@@ -195,7 +193,7 @@ async function checkCode(interaction) {
 }
 
 async function reconcile(guild) {
-    const removed = await store.removedClaims(config.guildId)
+    const removed = config.autoRoleRevocation ? await store.removedClaims(config.guildId) : []
     let revoked = 0
     let failed = 0
     for (const claim of removed) {
@@ -219,7 +217,8 @@ async function reconcile(guild) {
                 throw error
             })
             if (!member) continue
-            const unwanted = roleKinds.filter(kind => !desiredKinds(claim.role).includes(kind))
+            const unwanted = config.autoRoleRevocation
+                ? roleKinds.filter(kind => !desiredKinds(claim.role).includes(kind)) : []
             revoked += await removeManagedRoles(member, claim, unwanted)
             for (const kind of unwanted) {
                 if (claim[managedColumns[kind]]) await store.clearRoleManaged(config.guildId, claim.email, claim.user_id, kind)
@@ -242,11 +241,11 @@ async function uploadRoster(interaction) {
     if (!response.ok) throw new Error('Could not download the CSV attachment')
     const rows = parseRoster(await response.text())
     const outcome = await withMembershipLock(async () => {
-        const imported = await store.replaceRoster(config.guildId, rows, interaction.user.id)
+        const imported = await store.mergeRoster(config.guildId, rows, interaction.user.id)
         const reconciliation = await reconcile(interaction.guild)
         return { ...imported, ...reconciliation }
     })
-    await privateReply(interaction, `Roster version ${outcome.version} activated with ${outcome.count} members. Roles revoked: ${outcome.revoked}. Claims requiring role sync retry: ${outcome.failed}.`)
+    await privateReply(interaction, `Uploaded ${outcome.uploaded} rows. Active roster: ${outcome.count} emails, version ${outcome.version}. Existing roles were preserved. Claims requiring role sync retry: ${outcome.failed}.`)
 }
 
 async function handleRoster(interaction) {
@@ -264,10 +263,6 @@ async function handleRoster(interaction) {
         await privateReply(interaction, entries.length ? entries.map(entry =>
             `${new Date(entry.at).toISOString()} • ${entry.action} • by ${/^\d{17,20}$/.test(entry.actor_id) ? `<@${entry.actor_id}>` : entry.actor_id} • ${entry.detail}`
         ).join('\n').slice(0, 1900) : 'No roster or transfer actions recorded.')
-        return
-    }
-    if (subcommand === 'replace') {
-        await uploadRoster(interaction)
         return
     }
     if (subcommand === 'reconcile') {

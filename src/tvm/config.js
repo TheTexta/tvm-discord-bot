@@ -19,6 +19,7 @@ function loadConfig() {
         smtpFrom: required('SMTP_FROM'),
         resendApiKey: required('RESEND_API_KEY'),
         codeSecret: required('VERIFICATION_CODE_SECRET'),
+        autoRoleRevocation: process.env.TVM_AUTO_ROLE_REVOCATION === 'true',
         databasePath: process.env.TVM_DATABASE_PATH || '/usr/app/config/tvm.db',
         smtpHost: process.env.SMTP_HOST || 'smtp.resend.com',
         smtpPort: Number(process.env.SMTP_PORT || 465)
