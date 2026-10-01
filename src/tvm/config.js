@@ -13,6 +13,8 @@ function loadConfig() {
         applicationId: required('DISCORD_APPLICATION_ID'),
         guildId: required('TVM_GUILD_ID'),
         memberRoleId: required('TVM_MEMBER_ROLE_ID'),
+        execRoleId: required('TVM_EXEC_ROLE_ID'),
+        adminRoleId: required('TVM_ADMIN_ROLE_ID'),
         alertChannelId: required('TVM_ADMIN_ALERT_CHANNEL_ID'),
         smtpFrom: required('SMTP_FROM'),
         resendApiKey: required('RESEND_API_KEY'),
@@ -21,9 +23,10 @@ function loadConfig() {
         smtpHost: process.env.SMTP_HOST || 'smtp.resend.com',
         smtpPort: Number(process.env.SMTP_PORT || 465)
     }
-    for (const key of ['applicationId', 'guildId', 'memberRoleId', 'alertChannelId']) {
+    for (const key of ['applicationId', 'guildId', 'memberRoleId', 'execRoleId', 'adminRoleId', 'alertChannelId']) {
         if (!/^\d{17,20}$/.test(config[key])) throw new Error(`Invalid ${key}`)
     }
+    if (new Set([config.memberRoleId, config.execRoleId, config.adminRoleId]).size !== 3) throw new Error('Configured role IDs must be distinct')
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(config.smtpFrom)) throw new Error('Invalid SMTP_FROM')
     if (config.codeSecret.length < 32) throw new Error('VERIFICATION_CODE_SECRET must contain at least 32 characters')
     if (config.smtpPort !== 465) throw new Error('The TVM runtime currently requires implicit TLS on SMTP port 465')

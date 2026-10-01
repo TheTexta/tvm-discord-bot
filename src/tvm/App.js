@@ -67,6 +67,34 @@ const commands = [
 ].map(command => command.toJSON())
 
 const privateReply = (interaction, content, components = []) => interaction.editReply({ content, components })
+const roleKinds = ['member', 'exec', 'admin']
+const roleIds = { member: config.memberRoleId, exec: config.execRoleId, admin: config.adminRoleId }
+const roleNames = { member: 'General Member', exec: 'Executives (Producers & Editors)', admin: 'Admin Team' }
+const managedColumns = { member: 'managed_role', exec: 'managed_exec_role', admin: 'managed_admin_role' }
+const desiredKinds = role => role === 'exec' ? ['member', 'exec'] : role === 'admin' ? ['member', 'admin'] : ['member']
+const existingRoles = member => Object.fromEntries(roleKinds.map(kind => [kind, member.roles.cache.has(roleIds[kind])]))
+const roleSummary = role => desiredKinds(role).map(kind => roleNames[kind]).join(' and ')
+
+async function addMissingRoles(member, email, role) {
+    for (const kind of desiredKinds(role)) {
+        if (member.roles.cache.has(roleIds[kind])) continue
+        await store.markRoleManaged(config.guildId, email, member.id, kind)
+        await member.roles.add(roleIds[kind])
+    }
+}
+
+async function removeManagedRoles(member, claim, kinds = roleKinds) {
+    if (!member) return 0
+    let removed = 0
+    for (const kind of kinds) {
+        if (!claim[managedColumns[kind]]) continue
+        if (member.roles.cache.has(roleIds[kind])) {
+            await member.roles.remove(roleIds[kind])
+            removed++
+        }
+    }
+    return removed
+}
 const codeRow = () => new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('tvm:open-code').setLabel('Enter email code').setStyle(ButtonStyle.Primary)
 )
@@ -141,8 +169,7 @@ async function checkCode(interaction) {
     }
     await withMembershipLock(async () => {
         const member = await interaction.guild.members.fetch(interaction.user.id)
-        const alreadyHadRole = member.roles.cache.has(config.memberRoleId)
-        const result = await store.verifyAndClaim(config.guildId, interaction.user.id, code, alreadyHadRole)
+        const result = await store.verifyAndClaim(config.guildId, interaction.user.id, code, existingRoles(member))
         if (!result.ok) {
             const message = result.reason === 'claimed'
                 ? 'This roster email is already linked to another account. Ask a TVM administrator for an account transfer.'
@@ -151,7 +178,7 @@ async function checkCode(interaction) {
             return
         }
         try {
-            if (!alreadyHadRole) await member.roles.add(config.memberRoleId)
+            await addMissingRoles(member, result.email, result.role)
         } catch (error) {
             // Discord may apply a role and lose the response. Keep the claim so an
             // ambiguous API failure can never leave an untracked member role.
@@ -160,7 +187,7 @@ async function checkCode(interaction) {
             await privateReply(interaction, 'Your code was accepted, but role assignment could not be confirmed. Please contact a TVM administrator.')
             return
         }
-        await privateReply(interaction, 'Verification complete. You now have the TVM membership role.')
+        await privateReply(interaction, `Verification complete. Your roster email qualifies you for ${roleSummary(result.role)}.`)
     })
 }
 
@@ -174,18 +201,34 @@ async function reconcile(guild) {
                 if (error.code === 10007) return null
                 throw error
             })
-            if (claim.managed_role && member?.roles.cache.has(config.memberRoleId)) {
-                await member.roles.remove(config.memberRoleId)
-                revoked++
-            }
+            revoked += await removeManagedRoles(member, claim)
             await store.releaseRemovedClaim(config.guildId, claim.email, claim.user_id)
         } catch (error) {
             console.error('[TVM] Role revocation failed:', error?.message || error)
             failed++
         }
     }
+    const active = await store.activeClaims(config.guildId)
+    for (const claim of active) {
+        try {
+            const member = await guild.members.fetch(claim.user_id).catch(error => {
+                if (error.code === 10007) return null
+                throw error
+            })
+            if (!member) continue
+            const unwanted = roleKinds.filter(kind => !desiredKinds(claim.role).includes(kind))
+            revoked += await removeManagedRoles(member, claim, unwanted)
+            for (const kind of unwanted) {
+                if (claim[managedColumns[kind]]) await store.clearRoleManaged(config.guildId, claim.email, claim.user_id, kind)
+            }
+            await addMissingRoles(member, claim.email, claim.role)
+        } catch (error) {
+            console.error('[TVM] Active claim role sync failed:', error?.message || error)
+            failed++
+        }
+    }
     // Existing server role assignments are outside this bot's ownership.
-    if (failed) await alertAdmins(`${failed} removed roster claim(s) still need role revocation. Run /roster reconcile.`)
+    if (failed) await alertAdmins(`${failed} roster claim(s) still need role synchronization. Run /roster reconcile.`)
     return { revoked, failed }
 }
 
@@ -218,12 +261,12 @@ async function handleRoster(interaction) {
             const reconciliation = await reconcile(interaction.guild)
             return { ...imported, ...reconciliation }
         })
-        await privateReply(interaction, `Roster version ${outcome.version} activated with ${outcome.count} members. Roles revoked: ${outcome.revoked}. Revocations requiring retry: ${outcome.failed}.`)
+        await privateReply(interaction, `Roster version ${outcome.version} activated with ${outcome.count} members. Roles revoked: ${outcome.revoked}. Claims requiring role sync retry: ${outcome.failed}.`)
         return
     }
     if (subcommand === 'reconcile') {
         const result = await withMembershipLock(() => reconcile(interaction.guild))
-        await privateReply(interaction, `Roles revoked: ${result.revoked}. Revocations requiring retry: ${result.failed}.`)
+        await privateReply(interaction, `Roles revoked: ${result.revoked}. Claims requiring role sync retry: ${result.failed}.`)
         return
     }
     if (subcommand === 'repair') {
@@ -234,11 +277,8 @@ async function handleRoster(interaction) {
             const claim = await store.claimFor(config.guildId, email)
             if (!roster || !claim) throw new Error('No active roster claim exists for that email')
             const member = await interaction.guild.members.fetch(claim.user_id)
-            if (!member.roles.cache.has(config.memberRoleId)) {
-                await store.markRoleManaged(config.guildId, email, claim.user_id)
-                await member.roles.add(config.memberRoleId)
-            }
-            await privateReply(interaction, `Member role confirmed for <@${claim.user_id}>.`)
+            await addMissingRoles(member, email, roster.role)
+            await privateReply(interaction, `${roleSummary(roster.role)} confirmed for <@${claim.user_id}>.`)
         })
         return
     }
@@ -252,9 +292,7 @@ async function handleRoster(interaction) {
                 if (error.code === 10007) return null
                 throw error
             })
-            if (claim.managed_role && member?.roles.cache.has(config.memberRoleId)) {
-                await member.roles.remove(config.memberRoleId)
-            }
+            await removeManagedRoles(member, claim)
             await store.releaseClaim(config.guildId, email, interaction.user.id)
             await privateReply(interaction, `Claim released for <@${claim.user_id}>. They can verify again while on the active roster.`)
         })
@@ -273,17 +311,22 @@ async function handleRoster(interaction) {
                 if (error.code === 10007) return null
                 throw error
             })
-            const targetAlreadyHadRole = targetMember.roles.cache.has(config.memberRoleId)
-            const oldRoleRemoved = Boolean(prior.managed_role && oldMember?.roles.cache.has(config.memberRoleId))
-            if (oldRoleRemoved) await oldMember.roles.remove(config.memberRoleId)
+            const roster = await store.lookup(config.guildId, email)
+            const oldRoles = oldMember ? roleKinds.filter(kind => prior[managedColumns[kind]] && oldMember.roles.cache.has(roleIds[kind])) : []
             try {
-                await store.transfer(config.guildId, email, target.id, interaction.user.id, targetAlreadyHadRole)
+                await removeManagedRoles(oldMember, prior)
             } catch (error) {
-                if (oldRoleRemoved) await oldMember.roles.add(config.memberRoleId).catch(() => {})
+                for (const kind of oldRoles) await oldMember.roles.add(roleIds[kind]).catch(() => {})
                 throw error
             }
             try {
-                if (!targetAlreadyHadRole) await targetMember.roles.add(config.memberRoleId)
+                await store.transfer(config.guildId, email, target.id, interaction.user.id, existingRoles(targetMember))
+            } catch (error) {
+                for (const kind of oldRoles) await oldMember.roles.add(roleIds[kind]).catch(() => {})
+                throw error
+            }
+            try {
+                await addMissingRoles(targetMember, email, roster.role)
             } catch (error) {
                 await alertAdmins('An account transfer changed the claim, but the new role could not be confirmed. Use /roster repair after checking permissions.')
                 throw new Error('Claim transferred, but target role assignment could not be confirmed. Use /roster repair.')
@@ -300,11 +343,11 @@ client.once('clientReady', async () => {
         await rest.put(Routes.applicationGuildCommands(config.applicationId, config.guildId), { body: commands })
         console.log('[TVM] Bot ready; guild commands registered')
         const guild = await client.guilds.fetch(config.guildId)
-        const role = await guild.roles.fetch(config.memberRoleId)
+        const roles = await Promise.all(roleKinds.map(kind => guild.roles.fetch(roleIds[kind])))
         const botMember = await guild.members.fetchMe()
-        if (!role || !botMember.permissions.has(PermissionFlagsBits.ManageRoles) ||
-            botMember.roles.highest.position <= role.position) {
-            throw new Error('Bot cannot manage the configured membership role; check its permissions and role position')
+        if (roles.some(role => !role || botMember.roles.highest.position <= role.position) ||
+            !botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
+            throw new Error('Bot cannot manage all configured roles; check its permissions and role position')
         }
         const alertChannel = await client.channels.fetch(config.alertChannelId)
         if (!alertChannel?.isTextBased() || alertChannel.guildId !== guild.id ||
@@ -353,7 +396,7 @@ client.on('interactionCreate', async interaction => {
         if (interaction.commandName === 'postverify') {
             await interaction.reply({ content: 'Posting the verification button.', flags: MessageFlags.Ephemeral })
             await interaction.channel.send({
-                content: 'TVM members: click below and enter the email address on the TVM membership roster. We will email a verification code to that address. Source: https://github.com/TheTexta/tvm-discord-email-verification',
+                content: 'TVM members: verify the email address on the TVM roster. Everyone receives General Member. Editors and producers also receive Executives (Producers & Editors); admins also receive Admin Team. We will email a verification code to your roster address. Source: https://github.com/TheTexta/tvm-discord-email-verification',
                 components: [new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId('tvm:verify').setLabel('Verify TVM membership').setStyle(ButtonStyle.Success)
                 )]

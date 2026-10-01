@@ -24,11 +24,13 @@ class Store {
             PRAGMA journal_mode = WAL;
             PRAGMA busy_timeout = 5000;
             CREATE TABLE IF NOT EXISTS email_roster (guild_id TEXT NOT NULL, email TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'gm',
                 PRIMARY KEY (guild_id, email));
             CREATE TABLE IF NOT EXISTS email_roster_meta (guild_id TEXT PRIMARY KEY, version INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS email_claims (guild_id TEXT NOT NULL, email TEXT NOT NULL, user_id TEXT NOT NULL,
                 created_at INTEGER NOT NULL, managed_role INTEGER NOT NULL DEFAULT 0,
+                managed_exec_role INTEGER NOT NULL DEFAULT 0, managed_admin_role INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (guild_id, email), UNIQUE (guild_id, user_id));
             CREATE TABLE IF NOT EXISTS email_pending (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, email TEXT NOT NULL,
                 roster_version INTEGER NOT NULL, code_hash TEXT NOT NULL, expires_at INTEGER NOT NULL,
@@ -43,9 +45,14 @@ class Store {
                 action TEXT NOT NULL, detail TEXT NOT NULL, at INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS idx_email_admin_audit_guild_at ON email_admin_audit(guild_id, at);
         `).then(async () => {
-            const columns = await this._all('PRAGMA table_info(email_claims)')
-            if (!columns.some(column => column.name === 'managed_role')) {
-                await this._exec('ALTER TABLE email_claims ADD COLUMN managed_role INTEGER NOT NULL DEFAULT 0')
+            for (const [table, column, declaration] of [
+                ['email_roster', 'role', "TEXT NOT NULL DEFAULT 'gm'"],
+                ['email_claims', 'managed_role', 'INTEGER NOT NULL DEFAULT 0'],
+                ['email_claims', 'managed_exec_role', 'INTEGER NOT NULL DEFAULT 0'],
+                ['email_claims', 'managed_admin_role', 'INTEGER NOT NULL DEFAULT 0']
+            ]) {
+                const columns = await this._all(`PRAGMA table_info(${table})`)
+                if (!columns.some(item => item.name === column)) await this._exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`)
             }
         })
     }
@@ -78,7 +85,7 @@ class Store {
         })
     }
     lookup(guildId, email) {
-        return this._locked(() => this._get('SELECT email FROM email_roster WHERE guild_id = ? AND email = ?',
+        return this._locked(() => this._get('SELECT email, role FROM email_roster WHERE guild_id = ? AND email = ?',
             [guildId, normalizeEmail(email)]))
     }
     replaceRoster(guildId, rows, adminId) {
@@ -88,12 +95,13 @@ class Store {
             const emails = rows.map(row => normalizeEmail(row?.email))
             if (emails.some(email => !validEmail(email))) throw new Error('Roster contains an invalid email')
             if (new Set(emails).size !== emails.length) throw new Error('Roster contains duplicate emails')
+            if (rows.some(row => !['gm', 'exec', 'admin'].includes(row?.role))) throw new Error('Roster contains an invalid role')
             await this._exec('BEGIN IMMEDIATE')
             try {
                 const previous = await this._get('SELECT version FROM email_roster_meta WHERE guild_id = ?', [guildId])
                 await this._run('DELETE FROM email_roster WHERE guild_id = ?', [guildId])
-                for (const email of emails) {
-                    await this._run('INSERT INTO email_roster (guild_id, email) VALUES (?, ?)', [guildId, email])
+                for (let i = 0; i < rows.length; i++) {
+                    await this._run('INSERT INTO email_roster (guild_id, email, role) VALUES (?, ?, ?)', [guildId, emails[i], rows[i].role])
                 }
                 await this._run('DELETE FROM email_pending WHERE guild_id = ?', [guildId])
                 const version = (previous?.version || 0) + 1
@@ -160,7 +168,7 @@ class Store {
     pendingFor(guildId, userId) {
         return this._locked(() => this._get('SELECT email, expires_at FROM email_pending WHERE guild_id = ? AND user_id = ?', [guildId, userId]))
     }
-    verifyAndClaim(guildId, userId, code, alreadyHadRole = false) {
+    verifyAndClaim(guildId, userId, code, existingRoles = {}) {
         return this._locked(async () => {
             await this._exec('BEGIN IMMEDIATE')
             try {
@@ -176,7 +184,7 @@ class Store {
                     await this._exec('COMMIT')
                     return { ok: false, reason: 'invalid' }
                 }
-                const roster = await this._get('SELECT 1 FROM email_roster WHERE guild_id = ? AND email = ?', [guildId, pending.email])
+                const roster = await this._get('SELECT role FROM email_roster WHERE guild_id = ? AND email = ?', [guildId, pending.email])
                 const meta = await this._get('SELECT version FROM email_roster_meta WHERE guild_id = ?', [guildId])
                 if (!meta || meta.version !== pending.roster_version || !roster) {
                     await this._run('DELETE FROM email_pending WHERE guild_id = ? AND user_id = ?', [guildId, userId])
@@ -192,14 +200,24 @@ class Store {
                 }
                 const created = !holder
                 if (created) {
-                    await this._run(`INSERT INTO email_claims (guild_id, email, user_id, created_at, managed_role)
-                        VALUES (?, ?, ?, ?, ?)`, [guildId, pending.email, userId, Date.now(), alreadyHadRole ? 0 : 1])
-                } else if (!alreadyHadRole) {
-                    await this._run('UPDATE email_claims SET managed_role = 1 WHERE guild_id = ? AND email = ?', [guildId, pending.email])
+                    await this._run(`INSERT INTO email_claims (guild_id, email, user_id, created_at, managed_role, managed_exec_role, managed_admin_role)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)`, [guildId, pending.email, userId, Date.now(),
+                        existingRoles.member ? 0 : 1,
+                        roster.role === 'exec' && !existingRoles.exec ? 1 : 0,
+                        roster.role === 'admin' && !existingRoles.admin ? 1 : 0])
+                } else {
+                    await this._run(`UPDATE email_claims SET
+                        managed_role = CASE WHEN ? THEN managed_role ELSE 1 END,
+                        managed_exec_role = CASE WHEN ? THEN 1 ELSE managed_exec_role END,
+                        managed_admin_role = CASE WHEN ? THEN 1 ELSE managed_admin_role END
+                        WHERE guild_id = ? AND email = ?`, [existingRoles.member ? 1 : 0,
+                        roster.role === 'exec' && !existingRoles.exec ? 1 : 0,
+                        roster.role === 'admin' && !existingRoles.admin ? 1 : 0,
+                        guildId, pending.email])
                 }
                 await this._run('DELETE FROM email_pending WHERE guild_id = ? AND user_id = ?', [guildId, userId])
                 await this._exec('COMMIT')
-                return { ok: true, email: pending.email, created }
+                return { ok: true, email: pending.email, role: roster.role, created }
             } catch (error) {
                 await this._exec('ROLLBACK').catch(() => {})
                 throw error
@@ -212,9 +230,14 @@ class Store {
             [guildId, normalizeEmail(email), userId]))
     }
     removedClaims(guildId) {
-        return this._locked(() => this._all(`SELECT c.email, c.user_id, c.managed_role FROM email_claims c LEFT JOIN email_roster r
+        return this._locked(() => this._all(`SELECT c.email, c.user_id, c.managed_role, c.managed_exec_role, c.managed_admin_role FROM email_claims c LEFT JOIN email_roster r
             ON r.guild_id = c.guild_id AND r.email = c.email
             WHERE c.guild_id = ? AND r.email IS NULL`, [guildId]))
+    }
+    activeClaims(guildId) {
+        return this._locked(() => this._all(`SELECT c.email, c.user_id, c.managed_role, c.managed_exec_role, c.managed_admin_role, r.role
+            FROM email_claims c JOIN email_roster r ON r.guild_id = c.guild_id AND r.email = c.email
+            WHERE c.guild_id = ?`, [guildId]))
     }
     activeClaimUserIds(guildId) {
         return this._locked(async () => new Set((await this._all(`SELECT c.user_id FROM email_claims c INNER JOIN email_roster r
@@ -227,11 +250,19 @@ class Store {
             WHERE c.guild_id = ? AND c.user_id = ?`, [guildId, userId])))
     }
     claimFor(guildId, email) {
-        return this._locked(() => this._get('SELECT user_id, managed_role FROM email_claims WHERE guild_id = ? AND email = ?',
+        return this._locked(() => this._get('SELECT user_id, managed_role, managed_exec_role, managed_admin_role FROM email_claims WHERE guild_id = ? AND email = ?',
             [guildId, normalizeEmail(email)]))
     }
-    markRoleManaged(guildId, email, userId) {
-        return this._locked(() => this._run(`UPDATE email_claims SET managed_role = 1
+    markRoleManaged(guildId, email, userId, kind = 'member') {
+        const column = { member: 'managed_role', exec: 'managed_exec_role', admin: 'managed_admin_role' }[kind]
+        if (!column) throw new Error('Invalid role kind')
+        return this._locked(() => this._run(`UPDATE email_claims SET ${column} = 1
+            WHERE guild_id = ? AND email = ? AND user_id = ?`, [guildId, normalizeEmail(email), userId]))
+    }
+    clearRoleManaged(guildId, email, userId, kind) {
+        const column = { member: 'managed_role', exec: 'managed_exec_role', admin: 'managed_admin_role' }[kind]
+        if (!column) throw new Error('Invalid role kind')
+        return this._locked(() => this._run(`UPDATE email_claims SET ${column} = 0
             WHERE guild_id = ? AND email = ? AND user_id = ?`, [guildId, normalizeEmail(email), userId]))
     }
     releaseClaim(guildId, email, adminId) {
@@ -253,19 +284,22 @@ class Store {
             }
         })
     }
-    transfer(guildId, email, userId, adminId = 'system', targetAlreadyHadRole = false) {
+    transfer(guildId, email, userId, adminId = 'system', existingRoles = {}) {
         return this._locked(async () => {
             email = normalizeEmail(email)
             await this._exec('BEGIN IMMEDIATE')
             try {
-                const roster = await this._get('SELECT 1 FROM email_roster WHERE guild_id = ? AND email = ?', [guildId, email])
+                const roster = await this._get('SELECT role FROM email_roster WHERE guild_id = ? AND email = ?', [guildId, email])
                 if (!roster) throw new Error('Email is absent from the active roster')
                 const prior = await this._get('SELECT user_id FROM email_claims WHERE guild_id = ? AND email = ?', [guildId, email])
                 if (!prior) throw new Error('Email has no existing claim')
                 const other = await this._get('SELECT 1 FROM email_claims WHERE guild_id = ? AND user_id = ? AND email != ?', [guildId, userId, email])
                 if (other) throw new Error('Target Discord account already claims another roster email')
-                await this._run('UPDATE email_claims SET user_id = ?, created_at = ?, managed_role = ? WHERE guild_id = ? AND email = ?',
-                    [userId, Date.now(), targetAlreadyHadRole ? 0 : 1, guildId, email])
+                await this._run(`UPDATE email_claims SET user_id = ?, created_at = ?, managed_role = ?,
+                    managed_exec_role = ?, managed_admin_role = ? WHERE guild_id = ? AND email = ?`,
+                    [userId, Date.now(), existingRoles.member ? 0 : 1,
+                        roster.role === 'exec' && !existingRoles.exec ? 1 : 0,
+                        roster.role === 'admin' && !existingRoles.admin ? 1 : 0, guildId, email])
                 await this._run('DELETE FROM email_pending WHERE guild_id = ? AND email = ?', [guildId, email])
                 await this._run('INSERT INTO email_admin_audit VALUES (?, ?, ?, ?, ?)',
                     [guildId, adminId, 'account_transfer', JSON.stringify({ emailKey: this._emailKey(email), from: prior.user_id, to: userId }), Date.now()])

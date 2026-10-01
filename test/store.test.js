@@ -18,20 +18,20 @@ test('requires a roster email, persists codes, and binds one Discord account', a
         assert.equal(fs.statSync(filename).mode & 0o777, 0o600)
         assert.deepEqual(await store.status(guild), { meta: undefined, count: 0, unreconciled: 0 })
         await store.replaceRoster(guild, [
-            { email: 'one@example.org' }, { email: 'two@example.org' }
+            { email: 'one@example.org', role: 'exec' }, { email: 'two@example.org', role: 'gm' }
         ], 'admin')
         await assert.rejects(store.replaceRoster(guild, [
-            { email: 'three@example.org' }, { email: 'THREE@example.org' }
+            { email: 'three@example.org', role: 'gm' }, { email: 'THREE@example.org', role: 'gm' }
         ], 'admin'), /duplicate emails/)
         assert.equal((await store.status(guild)).count, 2)
-        assert.equal((await store.lookup(guild, 'ONE@example.org')).email, 'one@example.org')
+        assert.deepEqual(await store.lookup(guild, 'ONE@example.org'), { email: 'one@example.org', role: 'exec' })
         assert.equal(await store.lookup(guild, 'outsider@example.org'), undefined)
         await store.savePending(guild, 'user-a', 'one@example.org', '123456')
         await store.close()
         store = new Store(filename, 'a'.repeat(32))
         assert.equal((await store.pendingFor(guild, 'user-a')).email, 'one@example.org')
         assert.equal((await store.verifyAndClaim(guild, 'user-a', '000000')).reason, 'invalid')
-        assert.equal((await store.verifyAndClaim(guild, 'user-a', '123456')).ok, true)
+        assert.equal((await store.verifyAndClaim(guild, 'user-a', '123456')).role, 'exec')
         assert.deepEqual([...await store.activeClaimUserIds(guild)], ['user-a'])
         assert.equal(await store.isAuthorizedUser(guild, 'user-a'), true)
         assert.equal(await store.isAuthorizedUser(guild, 'user-b'), false)
@@ -43,10 +43,10 @@ test('requires a roster email, persists codes, and binds one Discord account', a
         assert.equal((await store.audit(guild))[0].action, 'account_transfer')
         await store.savePending(guild, 'user-a', 'one@example.org', '456789')
         assert.equal((await store.verifyAndClaim(guild, 'user-a', '456789')).reason, 'claimed')
-        await store.replaceRoster(guild, [{ email: 'two@example.org' }], 'admin')
+        await store.replaceRoster(guild, [{ email: 'two@example.org', role: 'gm' }], 'admin')
         assert.deepEqual([...await store.activeClaimUserIds(guild)], [])
         assert.equal(await store.isAuthorizedUser(guild, 'user-b'), false)
-        assert.deepEqual(await store.removedClaims(guild), [{ email: 'one@example.org', user_id: 'user-b', managed_role: 1 }])
+        assert.deepEqual(await store.removedClaims(guild), [{ email: 'one@example.org', user_id: 'user-b', managed_role: 1, managed_exec_role: 1, managed_admin_role: 0 }])
         assert.equal(await store.releaseClaim(guild, 'one@example.org', 'admin'), 'user-b')
         assert.equal((await store.audit(guild))[0].action, 'claim_release')
         assert.deepEqual(await store.removedClaims(guild), [])
@@ -61,13 +61,13 @@ test('preserves pre-existing role ownership when an email claim is removed', asy
     const store = new Store(path.join(dir, 'tvm.db'), 'c'.repeat(32))
     const guild = '123456789012345678'
     try {
-        await store.replaceRoster(guild, [{ email: 'existing@example.org' }], 'admin')
+        await store.replaceRoster(guild, [{ email: 'existing@example.org', role: 'admin' }], 'admin')
         await store.savePending(guild, 'user-a', 'existing@example.org', '123456')
-        assert.equal((await store.verifyAndClaim(guild, 'user-a', '123456', true)).ok, true)
+        assert.equal((await store.verifyAndClaim(guild, 'user-a', '123456', { member: true, admin: true })).ok, true)
         assert.equal((await store.claimFor(guild, 'existing@example.org')).managed_role, 0)
-        await store.replaceRoster(guild, [{ email: 'other@example.org' }], 'admin')
+        await store.replaceRoster(guild, [{ email: 'other@example.org', role: 'gm' }], 'admin')
         assert.deepEqual(await store.removedClaims(guild), [
-            { email: 'existing@example.org', user_id: 'user-a', managed_role: 0 }
+            { email: 'existing@example.org', user_id: 'user-a', managed_role: 0, managed_exec_role: 0, managed_admin_role: 0 }
         ])
     } finally {
         await store.close()
@@ -80,10 +80,10 @@ test('transfers and repairs can start managing a previously external role', asyn
     const store = new Store(path.join(dir, 'tvm.db'), 'e'.repeat(32))
     const guild = '123456789012345678'
     try {
-        await store.replaceRoster(guild, [{ email: 'existing@example.org' }], 'admin')
+        await store.replaceRoster(guild, [{ email: 'existing@example.org', role: 'gm' }], 'admin')
         await store.savePending(guild, 'user-a', 'existing@example.org', '123456')
-        await store.verifyAndClaim(guild, 'user-a', '123456', true)
-        await store.transfer(guild, 'existing@example.org', 'user-b', 'admin', true)
+        await store.verifyAndClaim(guild, 'user-a', '123456', { member: true })
+        await store.transfer(guild, 'existing@example.org', 'user-b', 'admin', { member: true })
         assert.equal((await store.claimFor(guild, 'existing@example.org')).managed_role, 0)
         await store.markRoleManaged(guild, 'existing@example.org', 'user-b')
         assert.equal((await store.claimFor(guild, 'existing@example.org')).managed_role, 1)
@@ -106,6 +106,33 @@ test('adds role ownership to a database created by the first email-only release'
         await store.ready
         const columns = await store._all('PRAGMA table_info(email_claims)')
         assert.equal(columns.some(column => column.name === 'managed_role'), true)
+        assert.equal(columns.some(column => column.name === 'managed_exec_role'), true)
+        assert.equal(columns.some(column => column.name === 'managed_admin_role'), true)
+        const rosterColumns = await store._all('PRAGMA table_info(email_roster)')
+        assert.equal(rosterColumns.some(column => column.name === 'role'), true)
+    } finally {
+        await store.close()
+        fs.rmSync(dir, { recursive: true, force: true })
+    }
+})
+
+test('tracks tier roles per claim and exposes roster changes for reconciliation', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvm-store-'))
+    const store = new Store(path.join(dir, 'tvm.db'), 'f'.repeat(32))
+    const guild = '123456789012345678'
+    try {
+        await store.replaceRoster(guild, [{ email: 'leader@example.org', role: 'admin' }], 'admin')
+        await store.savePending(guild, 'user-a', 'leader@example.org', '123456')
+        const result = await store.verifyAndClaim(guild, 'user-a', '123456', { member: true })
+        assert.equal(result.role, 'admin')
+        assert.deepEqual(await store.activeClaims(guild), [{ email: 'leader@example.org', user_id: 'user-a',
+            managed_role: 0, managed_exec_role: 0, managed_admin_role: 1, role: 'admin' }])
+        await store.replaceRoster(guild, [{ email: 'leader@example.org', role: 'exec' }], 'admin')
+        assert.equal((await store.activeClaims(guild))[0].role, 'exec')
+        await store.clearRoleManaged(guild, 'leader@example.org', 'user-a', 'admin')
+        await store.markRoleManaged(guild, 'leader@example.org', 'user-a', 'exec')
+        assert.deepEqual(await store.claimFor(guild, 'leader@example.org'), { user_id: 'user-a',
+            managed_role: 0, managed_exec_role: 1, managed_admin_role: 0 })
     } finally {
         await store.close()
         fs.rmSync(dir, { recursive: true, force: true })
@@ -117,9 +144,9 @@ test('roster replacement invalidates pending codes and send limits apply', async
     const store = new Store(path.join(dir, 'tvm.db'), 'b'.repeat(32))
     const guild = '123456789012345678'
     try {
-        await store.replaceRoster(guild, [{ email: 'old@example.org' }], 'admin')
+        await store.replaceRoster(guild, [{ email: 'old@example.org', role: 'gm' }], 'admin')
         await store.savePending(guild, 'user-a', 'old@example.org', '123456')
-        await store.replaceRoster(guild, [{ email: 'new@example.org' }], 'admin')
+        await store.replaceRoster(guild, [{ email: 'new@example.org', role: 'gm' }], 'admin')
         assert.equal((await store.verifyAndClaim(guild, 'user-a', '123456')).reason, 'expired')
         assert.equal(await store.allowRequest(guild, 'user-a', 'new@example.org'), true)
         assert.equal(await store.reserveSend(guild, 'user-a', 'new@example.org'), true)

@@ -13,6 +13,8 @@ const token = required('DISCORD_BOT_TOKEN')
 const applicationId = required('DISCORD_APPLICATION_ID')
 const guildId = required('TVM_GUILD_ID')
 const memberRoleId = required('TVM_MEMBER_ROLE_ID')
+const execRoleId = required('TVM_EXEC_ROLE_ID')
+const adminRoleId = required('TVM_ADMIN_ROLE_ID')
 const alertChannelId = required('TVM_ADMIN_ALERT_CHANNEL_ID')
 const base = 'https://discord.com/api/v10'
 
@@ -71,14 +73,14 @@ async function main() {
     let member
     if (bot.data && guild.data) member = await get(`/guilds/${guildId}/members/${bot.data.id}`)
     check('Bot is installed in the server', Boolean(member?.data))
-    const target = roles.data?.find(role => role.id === memberRoleId)
-    check('Configured membership role exists', Boolean(target))
+    const targets = [memberRoleId, execRoleId, adminRoleId].map(id => roles.data?.find(role => role.id === id))
+    check('Configured membership, executive, and admin roles exist', targets.every(Boolean))
     const botRoles = roles.data?.filter(role => member?.data?.roles.includes(role.id)) || []
     const highest = Math.max(0, ...botRoles.map(role => role.position))
     let basePermissions = BigInt(roles.data?.find(role => role.id === guildId)?.permissions || 0)
     for (const role of botRoles) basePermissions |= BigInt(role.permissions)
-    check('Bot has Manage Roles and sits above the membership role', Boolean(target) &&
-        Boolean(basePermissions & PermissionFlagsBits.ManageRoles) && highest > target.position)
+    check('Bot has Manage Roles and sits above all assigned roles',
+        targets.every(role => role && highest > role.position) && Boolean(basePermissions & PermissionFlagsBits.ManageRoles))
     check('Bot can access the configured alert channel', channel.data?.guild_id === guildId)
     if (channel.data && guild.data && member?.data && roles.data) {
         check('Bot can view and send in the alert channel',

@@ -12,7 +12,7 @@ function parseRoster(csv) {
             columns: headers => {
                 const normalized = headers.map(header => header.trim())
                 if (new Set(normalized).size !== normalized.length) throw new Error('Duplicate CSV headers')
-                if (!normalized.includes('Email')) throw new Error('CSV needs an Email header')
+                if (!normalized.includes('Email') || !normalized.includes('Role')) throw new Error('CSV needs Email and Role headers')
                 return normalized
             },
             skip_empty_lines: true,
@@ -31,7 +31,12 @@ function parseRoster(csv) {
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error(`Invalid Email on row ${index + 2}`)
         if (emails.has(email)) throw new Error(`Duplicate Email on row ${index + 2}`)
         emails.add(email)
-        return { email }
+        const label = String(record.Role ?? '').trim().toLowerCase()
+        const role = label === 'gm' ? 'gm'
+            : /^exec\s*[-:]\s*(editor|producer)$/.test(label) ? 'exec'
+                : label === 'admin' ? 'admin' : null
+        if (!role) throw new Error(`Invalid Role on row ${index + 2}`)
+        return { email, role }
     })
 }
 
