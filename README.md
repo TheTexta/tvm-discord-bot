@@ -20,6 +20,8 @@ Use a dedicated Resend key for this bot and leave open and click tracking disabl
 
 Set the bot's role above `TVM Member` and grant it Manage Roles, View Channels, Send Messages, and Use Application Commands. Enable Server Members Intent in the Discord Developer Portal. Install with `bot` and `applications.commands` scopes. Make a private administrator alert channel and configure `TVM_ADMIN_ALERT_CHANNEL_ID` for failures. The bot only registers commands in `TVM_GUILD_ID`.
 
+After filling `.env.local` locally, run `npm run discord:check` to check the application, member intent, server installation, role hierarchy, and alert-channel access without printing credentials. This check makes no Discord changes. It does not test mail delivery.
+
 The roster CSV must contain `Student ID` and `Email` headers. **Export only eligible members.** Other columns are ignored; workshop/training fields do not change eligibility. Student numbers are read as text, so leading zeroes survive. A replacement is rejected if it is empty, malformed, has duplicate IDs or emails, or exceeds 2 MiB or 10,000 rows. Invalid replacements leave the active roster unchanged.
 
 Check an export locally before uploading it. The checker prints row numbers and issue types without printing student numbers or email addresses:

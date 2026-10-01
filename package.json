@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/tvm/App.js",
     "test": "node --test test/*.test.js",
-    "roster:check": "node scripts/check-roster.js"
+    "roster:check": "node scripts/check-roster.js",
+    "discord:check": "node --env-file=.env.local scripts/check-discord.js"
   },
   "author": "TVM contributors (based on EmailVerify by Lars Benedikt Kaesberg)",
   "license": "AGPL-3.0-or-later",
