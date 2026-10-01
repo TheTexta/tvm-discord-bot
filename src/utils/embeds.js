@@ -1,0 +1,235 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2021-2026 Lars Benedikt Kaesberg
+//
+// This file is part of EmailVerify, a Discord email verification bot.
+// EmailVerify is free software: you can redistribute it and/or modify it under
+// the terms of the GNU Affero General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option) any
+// later version. See the LICENSE file for details.
+
+const { EmbedBuilder } = require('discord.js');
+const { getLocale, defaultLanguage } = require('../Language');
+
+/**
+ * Creates a "Session Expired" embed for when user is not linked to a guild
+ * @param {string} [language] - Language code for localization
+ * @param {boolean} [includeEmailStep] - Whether to include the step about entering email
+ * @returns {EmbedBuilder}
+ */
+function createSessionExpiredEmbed(language = defaultLanguage, includeEmailStep = true) {
+    return new EmbedBuilder()
+        .setTitle(getLocale(language, 'sessionExpiredTitle'))
+        .setDescription(getLocale(language, includeEmailStep ? 'sessionExpiredDescription' : 'sessionExpiredDescriptionShort'))
+        .setColor(0xED4245);
+}
+
+/**
+ * Creates a "Code Expired" embed (the verification code TTL elapsed).
+ * @param {string} language - Language code for localization
+ * @returns {EmbedBuilder}
+ */
+function createCodeExpiredEmbed(language) {
+    return new EmbedBuilder()
+        .setTitle(getLocale(language, 'codeExpiredTitle'))
+        .setDescription(getLocale(language, 'codeExpiredDescription'))
+        .setColor(0xED4245);
+}
+
+/**
+ * Creates a "Too Many Attempts" embed (max wrong-code submissions reached).
+ * @param {string} language - Language code for localization
+ * @returns {EmbedBuilder}
+ */
+function createTooManyAttemptsEmbed(language) {
+    return new EmbedBuilder()
+        .setTitle(getLocale(language, 'codeTooManyAttemptsTitle'))
+        .setDescription(getLocale(language, 'codeTooManyAttemptsDescription'))
+        .setColor(0xED4245);
+}
+
+/**
+ * Creates the generic user-facing error embed ("something went wrong, admins notified").
+ * Single source of truth shared by ErrorNotifier and direct reply sites.
+ * @param {string} language - Language code for localization
+ * @returns {EmbedBuilder}
+ */
+function createGenericErrorEmbed(language) {
+    return new EmbedBuilder()
+        .setTitle(getLocale(language, 'errorGenericTitle'))
+        .setDescription(getLocale(language, 'errorGenericDescription'))
+        .setColor(0xED4245)
+        .setTimestamp();
+}
+
+/**
+ * Creates an "Invalid Code" embed
+ * @param {string} language - Language code for localization
+ * @returns {EmbedBuilder}
+ */
+function createInvalidCodeEmbed(language) {
+    return new EmbedBuilder()
+        .setTitle(getLocale(language, 'invalidCodeTitle'))
+        .setDescription(getLocale(language, 'invalidCodeDescription'))
+        .setColor(0xED4245);
+}
+
+/**
+ * Creates an "Invalid Email" embed
+ * @param {string} language - Language code for localization
+ * @returns {EmbedBuilder}
+ */
+function createInvalidEmailEmbed(language) {
+    return new EmbedBuilder()
+        .setTitle(getLocale(language, 'mailInvalidTitle'))
+        .setDescription(getLocale(language, 'mailInvalidDescription'))
+        .setColor(0xED4245);
+}
+
+/**
+ * Creates a "Verification Success" embed
+ * @param {string} language - Language code for localization
+ * @param {string|string[]} roleNames - Name(s) of the verified role(s)
+ * @param {string} serverName - Name of the server
+ * @param {string} serverIconURL - URL of the server icon
+ * @returns {EmbedBuilder}
+ */
+function createVerificationSuccessEmbed(language, roleNames, serverName, serverIconURL) {
+    // Handle both single role name (legacy) and array of role names
+    const roleList = Array.isArray(roleNames) ? roleNames : [roleNames]
+    const rolesText = roleList.length > 0 ? roleList.join(', ') : 'Verified'
+    
+    return new EmbedBuilder()
+        .setTitle(getLocale(language, 'verificationSuccessTitle'))
+        .setDescription(getLocale(language, 'verificationSuccessDescription', rolesText, serverName))
+        .setColor(0x57F287)
+        .setThumbnail(serverIconURL);
+}
+
+/**
+ * Creates a "Code Sent" embed
+ * @param {string} language - Language code for localization
+ * @param {string} email - Email address the code was sent to
+ * @returns {EmbedBuilder}
+ */
+function createCodeSentEmbed(language, email) {
+    return new EmbedBuilder()
+        .setTitle(getLocale(language, 'codePromptTitle'))
+        .setDescription(getLocale(language, 'codePromptDescription', email))
+        .setColor(0x57F287)
+        .addFields({
+            name: getLocale(language, 'codePromptTip'),
+            value: getLocale(language, 'codePromptTipValue')
+        });
+}
+
+/**
+ * Creates a verification log embed for the log channel
+ * @param {Object} options - Options for the embed
+ * @param {Object} options.user - The Discord user who was verified
+ * @param {string} options.email - The email address used for verification
+ * @param {string} options.type - Type of verification: 'email' or 'manual'
+ * @param {Object} [options.admin] - The admin who performed manual verification (for manual type)
+ * @param {Object} [options.role] - The verified role that was assigned
+ * @returns {EmbedBuilder}
+ */
+function createVerificationLogEmbed({ user, email, type, admin, role }) {
+    const isManual = type === 'manual';
+    
+    const embed = new EmbedBuilder()
+        .setAuthor({
+            name: user.tag || user.username,
+            iconURL: user.displayAvatarURL({ dynamic: true })
+        })
+        .setColor(isManual ? 0xFFA500 : 0x57F287)
+        .setTimestamp();
+
+    if (isManual) {
+        embed.setTitle('🔧 Manual Verification');
+        embed.setDescription(`<@${user.id}> was manually verified by an administrator.`);
+        embed.addFields(
+            { name: '👤 User', value: `<@${user.id}>\n\`${user.id}\``, inline: true },
+            { name: '📧 Email', value: `\`${email}\``, inline: true },
+            { name: '👮 Verified By', value: admin ? `<@${admin.id}>` : 'Unknown', inline: true }
+        );
+    } else {
+        embed.setTitle('✅ Email Verification');
+        embed.setDescription(`<@${user.id}> has successfully verified their email.`);
+        embed.addFields(
+            { name: '👤 User', value: `<@${user.id}>\n\`${user.id}\``, inline: true },
+            { name: '📧 Email', value: `\`${email}\``, inline: true }
+        );
+    }
+
+    if (role) {
+        embed.addFields({ name: '🎭 Role Assigned', value: `<@&${role.id}>`, inline: true });
+    }
+
+    embed.setFooter({ 
+        text: isManual ? 'Manual verification' : 'Email verification'
+    });
+
+    return embed;
+}
+
+/**
+ * Creates a verification failed log embed for the log channel
+ * @param {Object} options - Options for the embed
+ * @param {Object} options.user - The Discord user who failed verification
+ * @param {string} options.email - The email address attempted
+ * @param {string} options.reason - Reason for failure
+ * @returns {EmbedBuilder}
+ */
+function createVerificationFailedLogEmbed({ user, email, reason }) {
+    return new EmbedBuilder()
+        .setTitle('❌ Verification Failed')
+        .setAuthor({
+            name: user.tag || user.username,
+            iconURL: user.displayAvatarURL({ dynamic: true })
+        })
+        .setDescription(`<@${user.id}> failed to verify.`)
+        .addFields(
+            { name: '👤 User', value: `<@${user.id}>\n\`${user.id}\``, inline: true },
+            { name: '📧 Email Attempted', value: email ? `\`${email}\`` : 'N/A', inline: true },
+            { name: '❓ Reason', value: reason, inline: false }
+        )
+        .setColor(0xED4245)
+        .setTimestamp()
+        .setFooter({ text: 'Verification attempt failed' });
+}
+
+module.exports = {
+    createSessionExpiredEmbed,
+    createCodeExpiredEmbed,
+    createTooManyAttemptsEmbed,
+    createGenericErrorEmbed,
+    createInvalidCodeEmbed,
+    createInvalidEmailEmbed,
+    createVerificationSuccessEmbed,
+    createCodeSentEmbed,
+    createVerificationLogEmbed,
+    createVerificationFailedLogEmbed,
+    createMailLimitReachedEmbed,
+    createCSVPremiumRequiredEmbed,
+};
+
+function createMailLimitReachedEmbed(language, websiteUrl = null) {
+    let description = getLocale(language, 'premiumMailLimitDescription')
+    if (websiteUrl) {
+        description += '\n\n' + getLocale(language, 'premiumMailLimitWebsiteHint', websiteUrl)
+    }
+    return new EmbedBuilder()
+        .setTitle(getLocale(language, 'premiumMailLimitTitle'))
+        .setDescription(description)
+        .setColor(0xFFA500);
+}
+
+function createCSVPremiumRequiredEmbed(language, storeLink = null) {
+    let description = getLocale(language, 'premiumCsvRequiredDescription')
+    if (storeLink) {
+        description += '\n\n' + getLocale(language, 'premiumMobileHint', storeLink)
+    }
+    return new EmbedBuilder()
+        .setTitle(getLocale(language, 'premiumCsvRequiredTitle'))
+        .setDescription(description)
+        .setColor(0x5865F2);
+}

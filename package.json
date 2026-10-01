@@ -1,0 +1,22 @@
+{
+  "name": "tvm-discord-email-verification",
+  "version": "1.0.0",
+  "description": "Roster-gated TVM Discord email verification, based on EmailVerify",
+  "main": "src/tvm/App.js",
+  "scripts": {
+    "start": "node src/tvm/App.js",
+    "test": "node --test test/*.test.js",
+    "roster:check": "node scripts/check-roster.js"
+  },
+  "author": "TVM contributors (based on EmailVerify by Lars Benedikt Kaesberg)",
+  "license": "AGPL-3.0-or-later",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "csv-parse": "^7.0.3",
+    "discord.js": "^14.25.1",
+    "nodemailer": "^10.0.13",
+    "sqlite3": "^6.0.1"
+  }
+}

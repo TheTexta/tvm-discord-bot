@@ -1,0 +1,22 @@
+node_modules
+.env
+.env.*
+!.env.example
+config/tvm.db
+config/tvm.db-*
+*.csv
+*.sqlite
+*.sqlite-*
+config/config.json
+.idea
+config/bot.db
+# SQLite's sidecar files. The -wal in particular holds pages not yet checkpointed
+# into bot.db, i.e. real database content, so it must be ignored alongside it.
+config/bot.db-*
+src/bot.db
+config/ServerStats.json
+discord-verify.txt
+config/ServerStatsHistory.log
+site
+.playwright-mcp
+*.pyc

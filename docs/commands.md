@@ -1,0 +1,275 @@
+---
+title: Command Reference
+description: Every EmailVerify slash command, covering role and domain configuration, domain-specific roles, blacklists, CSV allowlists, settings, moderation and data deletion.
+---
+
+# Commands
+
+## 👤 User Commands
+
+These commands can be used by any user.
+
+| Command | Description |
+|---------|-------------|
+| `/verify` | Start the email verification process to get access to the server |
+| `/vote` | Vote for EmailVerify on top.gg or discordbotlist.com; each vote gives this server +5 free verification emails this month (up to +25) |
+| `/data delete-user` | Delete your personal verification data and remove your verified status |
+| `/help` | Show your commands, how verification works, and the bot's source code & license (AGPL-3.0) |
+
+> 💡 **Didn't get the code?** The "Code Sent" message has a **Resend code** button (60-second cooldown). Codes are valid for 15 minutes and allow up to 5 attempts.
+
+---
+
+## 🔧 Administrator Commands
+
+The following commands require administrator permissions.
+
+### 👥 Role Configuration
+
+Configure which roles are assigned during the verification process.
+
+#### Default Roles
+
+Default roles are given to **all** verified users, regardless of their email domain.
+
+| Command | Description |
+|---------|-------------|
+| `/role add <role>` | Add a role to the default roles list |
+| `/role remove <role>` | Remove a role from the default roles list |
+| `/role list` | View all configured default roles |
+| `/role unverified [role]` | Set or view the optional role for unverified members (select current role to disable) |
+
+#### Domain-Specific Roles
+
+Assign different roles based on which email domain the user verifies with. Users receive their domain-specific roles **plus** any default roles.
+
+| Command | Description |
+|---------|-------------|
+| `/domainrole add <domain> <role>` | Add a role for a specific email domain |
+| `/domainrole remove <domain> <role>` | Remove a role from a specific domain |
+| `/domainrole list` | View all domain-role mappings |
+| `/domainrole clear <domain>` | Remove all roles for a specific domain |
+
+#### Domain Role Examples
+
+| Setup | Result |
+|-------|--------|
+| Default: `@Member`<br>Domain: `@*.edu` → `@Student` | User with `@stanford.edu` gets: `@Student`, `@Member` |
+| Default: `@Verified`<br>Domain: `@company.com` → `@Employee`, `@Staff` | User with `@company.com` gets: `@Employee`, `@Staff`, `@Verified` |
+| Domain: `@*.harvard.edu` → `@Harvard`<br>Domain: `@*.edu` → `@Student` | User with `@cs.harvard.edu` gets: `@Harvard`, `@Student` (all matching patterns) |
+
+> 💡 **Tip:** `/domainrole add`, `/domain remove` and `/blacklist remove` all autocomplete from what you have configured — start typing and pick from the list. For `/domain remove` and `/blacklist remove` you can keep going with a comma to remove several at once.
+
+### 📧 Domain Management
+
+Control which email domains are allowed for verification.
+
+| Command | Description |
+|---------|-------------|
+| `/domain add <domains>` | Add allowed email domains (comma-separated for multiple) |
+| `/domain remove <domains>` | Remove allowed domains |
+| `/domain list` | View all currently allowed domains |
+| `/domain clear` | Remove all allowed domains |
+
+#### Wildcard Support
+
+Use `*` as a wildcard to match any text:
+
+| Pattern | Matches | Example |
+|---------|---------|---------|
+| `@gmail.com` | Only Gmail | `user@gmail.com` ✓ |
+| `@*.edu` | Any .edu domain | `user@stanford.edu` ✓, `user@mit.edu` ✓ |
+| `@*.harvard.edu` | Harvard subdomains | `user@cs.harvard.edu` ✓, `user@law.harvard.edu` ✓ |
+| `@company.com` | Specific company | `user@company.com` ✓ |
+
+### 🚫 Blacklist Management
+
+Block specific email addresses or patterns from verifying. Supports `*` wildcard.
+
+| Command | Description |
+|---------|-------------|
+| `/blacklist add <patterns>` | Add patterns to the blacklist (supports `*` wildcard) |
+| `/blacklist remove <patterns>` | Remove patterns from the blacklist |
+| `/blacklist list` | View all blacklisted entries |
+| `/blacklist clear` | Remove all entries from the blacklist |
+
+#### Blacklist Wildcard Examples
+
+| Pattern | Blocks | Example Matches |
+|---------|--------|-----------------|
+| `spam@example.com` | Specific email | `spam@example.com` |
+| `*@tempmail.*` | All tempmail domains | `user@tempmail.com`, `test@tempmail.net` |
+| `*spam*` | Emails containing "spam" | `spam@gmail.com`, `myspammail@test.com` |
+| `test*@*` | Emails starting with "test" | `test123@gmail.com`, `testuser@company.com` |
+
+### ⚙️ Settings
+
+Configure bot behavior and preferences.
+
+| Command | Description |
+|---------|-------------|
+| `/settings language <language>` | Change the bot's display language |
+| `/settings log-channel [channel]` | Set a channel for verification logs (leave empty to disable) |
+| `/settings verify-message [message]` | Set a custom message shown in the verification form (leave empty for default) |
+| `/settings auto-verify <enable>` | Automatically prompt new members to verify when they join |
+| `/settings auto-unverified <enable>` | Automatically assign the unverified role to new members |
+| `/settings email-style <plain\|styled> [confirm]` | Choose plain text (default) or HTML rendering for verification emails. Switching to `styled` requires `confirm:True` because HTML mail is more likely to be filtered as spam. |
+| `/settings mail-mode <free\|zeptomail>` | Choose how verification emails leave the bot. `free` (default) uses the operator's self-SMTP server with the 25/month free quota. `zeptomail` is an opt-in **credit-funded** mode: no free quota — every verification routes through Zoho ZeptoMail and costs 1 bonus credit. Auto-disables back to `free` when credits hit 0 and notifies the server owner. Requires bonus credits to enable. |
+
+### 🛡️ Moderation & Setup
+
+| Command | Description |
+|---------|-------------|
+| `/setup` | **Guided setup wizard** — create a Verified role in one click (or pick existing roles), optionally create an Unverified role for new members, restrict email domains (or allow any), and post the verification message. The fastest way to get started. |
+| `/button <channel> <buttontext> [title] [message] [color]` | Create a verification button embed in a channel |
+| `/testmail <email>` | Send a test verification email through the real delivery path — reports the provider used and latency, so you can check inbox vs. spam placement. Counts against the monthly quota, max 3 per day. |
+| `/manualverify <user> <email>` | Manually verify a user without email confirmation |
+| `/set_error_notify channel <channel> [ping] [ping_role]` | Send error notifications to a channel, optionally pinging @everyone, @here or a role |
+| `/set_error_notify clear` | Remove the error channel (notifications fall back to the log channel) |
+| `/set_error_notify me <on\|off>` | Turn error DMs on or off for yourself (the server owner gets them by default) |
+| `/set_error_notify status` | View current error notification settings |
+
+### 📋 Allowed Email List
+
+Restrict verification to a specific set of addresses rather than a whole domain.
+While a list exists, **only** addresses on it can verify.
+
+| Command | Description |
+|---------|-------------|
+| `/emaillist add <email>` | Add a single address to the list. **Pro or CSV unlock required** |
+| `/emaillist upload <file>` | Upload a CSV/TXT of addresses (one per row). Appends to the list; duplicates are skipped. **Pro or CSV unlock required** |
+| `/emaillist remove <email>` | Remove a single address from the list |
+| `/emaillist clear` | Remove every address, returning the server to domain-only checking |
+
+Addresses are stored hashed, so the individual entries can never be listed back —
+only the count, shown in `/status`. `remove` still works on a hashed list: the
+address you type is hashed and the matching entry deleted.
+
+`add` and `upload` are the paid capability. `remove` and `clear` are deliberately
+**not** gated behind Pro, so a server whose CSV access has lapsed can still shrink
+or empty a list that would otherwise block all verification.
+
+For adding addresses in bulk from your own systems rather than by hand, see the
+[allowed-email API](api.md).
+
+### 🔌 Allowed-email API (Pro)
+
+Issue and manage the access token for the [allowed-email API](api.md), which lets
+your own systems keep the allowlist in sync. Requires the **Pro** subscription —
+the one-time CSV unlock does not include it.
+
+| Command | Description |
+|---------|-------------|
+| `/api token generate` | Issue a new API token, shown once, invalidating any previous one |
+| `/api token status` | Show when the token was created and last used, plus the current list size |
+| `/api token revoke` | Permanently disable the token |
+
+### 💎 Premium
+
+Manage paid plans, credit packs, and the CSV unlock.
+
+| Command | Description |
+|---------|-------------|
+| `/premium status` | Show this server's current plan, monthly email usage, remaining bonus credits, and CSV unlock status |
+| `/premium redeem` | Apply purchases (credit packs, CSV unlock) **to this server** |
+
+#### How redemption works
+
+EmailVerify's premium features are sold through Discord's native subscription
+and consumable system. There is one important detail to know:
+
+> **Purchases are bound per server, not per user.**
+>
+> When you click a Premium button (in `/premium status` or in the limit-reached
+> embed) and complete the purchase in Discord, the credits or unlock you bought
+> are not yet active. You must run `/premium redeem` **inside the Discord
+> server** where you want the purchase to apply. Subscriptions track the server
+> selected at the time of purchase. Credit packs and the CSV unlock are
+> consumed by `/premium redeem` and become permanently bound to that server —
+> they cannot be transferred to another server afterwards.
+
+If `/premium redeem` reports "no unredeemed purchases", check that:
+
+- you are running the command in the **correct server** (the one you want the
+  benefit applied to);
+- you are using the **same Discord account** that completed the purchase;
+- the purchase has finished processing (Discord usually takes 1–2 minutes).
+
+#### What free users get
+
+Each server gets a small monthly free quota of verification emails (default 25
+per month). The bot will warn admins via the configured error-notification
+channel as the quota approaches: at 80%, at 95%, and again when the limit is
+reached. The 80%/95% warnings include a **run-out forecast** ("at the current
+pace, the free emails will run out around the 14th") so you can act before
+members are affected. Quota resets at the start of each calendar month.
+
+**After the limit is reached**, every further verification attempt is counted
+as a *blocked attempt*. Admins are notified — with purchase buttons attached —
+on the 1st, 5th, and 20th blocked member each month, and the running count is
+shown in `/status` and `/premium status` ("🚫 N verification attempts blocked
+this month"). Each blocked attempt is a member who tried to join but couldn't
+verify.
+
+#### Mail delivery modes
+
+Non-subscribed servers can pick which delivery path to use via
+`/settings mail-mode`:
+
+- **`free` (default)** — Verification emails are sent through the operator's
+  self-SMTP server (`mail.larskaesberg.de`). The 25/month free quota applies.
+  Bonus credits, if any, are consumed as overflow once the free quota is gone.
+- **`zeptomail` (credit-funded)** — Every verification routes through
+  **Zoho ZeptoMail** (EU endpoint, premium deliverability) and costs **1
+  bonus credit** per send. The 25/month free quota is **not** used in this
+  mode. When credits reach 0, the server is automatically switched back to
+  `free` mode and the owner is notified.
+
+Subscribed servers (Standard or Pro) always use ZeptoMail with unlimited
+verifications — the `mail-mode` setting is ignored while a subscription is
+active. If ZeptoMail is ever unreachable, the bot falls back to self-SMTP and
+notifies the operator.
+
+### 📊 Information
+
+| Command | Description |
+|---------|-------------|
+| `/status` | View bot configuration, verification statistics, blocked-attempt count, quota forecast, and check for setup issues |
+| `/help` | Show setup instructions and command overview (admins see the full setup guide; everyone else sees the user commands and the source/license notice) |
+
+### ⚠️ Data Management (Danger Zone)
+
+| Command | Description |
+|---------|-------------|
+| `/data delete-server` | Delete all server data and remove the bot from the server |
+
+---
+
+## ⚠️ Important Notes
+
+### Role Hierarchy
+
+The **EmailBot role must be higher** in the role hierarchy than both the verified and unverified roles. Otherwise, you'll see this error:
+
+> `Can't find roles. Please contact the admin!`
+
+![Role Hierarchy Example](https://raw.githubusercontent.com/lkaesberg/EmailBot/main/images/bothierarchy.png)
+
+### Unverified Role Usage
+
+The unverified role can be used to:
+- Make a verification channel visible only to unverified users
+- Restrict access to most channels until users verify
+- Combined with `/settings auto-unverified`, automatically restrict new members
+
+### Role Display in Verification
+
+When domain-specific roles are configured, the verification modal shows users which roles they will receive:
+
+```
+Accepted domains:
+1. @*.edu → Student, Member
+2. @company.com → Employee, Member
+```
+
+This helps users understand what access they'll get before verifying.

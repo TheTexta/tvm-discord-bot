@@ -1,0 +1,364 @@
+---
+title: EmailVerify Bot — Email Verification for Discord
+description: Verify that Discord members really own an email address at a domain you choose (@*.edu, your company domain, or a fixed allowlist) before they get a role. Free for 25 verifications a month, open source, GDPR-friendly.
+faq:
+  - q: How does email verification on Discord work?
+    a: The member clicks a button in your server, types their email address into a popup, and receives a 6-digit code. Entering that code back in Discord proves they control the mailbox, and the bot assigns the role you configured. No external account and no OAuth is involved.
+  - q: Is EmailVerify free?
+    a: Yes. Every server gets 25 verification emails per month at no cost, with every configuration feature included. About 95% of servers never exceed that. Busier servers can buy credit packs or a subscription through Discord.
+  - q: Can I restrict my Discord server to university students?
+    a: Yes. Add @*.edu as an allowed domain to accept any US university address, or add a specific domain such as @students.uni-example.de. You can also map different domains to different roles, so staff and students get separate roles automatically.
+  - q: Does the bot store email addresses?
+    a: Only as cryptographic hashes. The plaintext address exists just long enough to send the verification code and is never written to disk, so a database compromise cannot reveal your members' addresses.
+  - q: Can I self-host EmailVerify?
+    a: Yes. The source is on GitHub under AGPL-3.0 and there is a prebuilt Docker image. You supply your own SMTP credentials and the quota system does not apply.
+---
+
+<div class="hero-head" markdown>
+
+# EmailVerify Bot
+
+<span class="laurel-badge" aria-label="The #1 email verification bot for Discord since 2021"><svg class="laurel-side" viewBox="0 0 420 802" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true"><use xlink:href="#laurel-branch"></use></svg><span class="laurel-inner"><span class="laurel-title">#1 Email<br>Verification<br>on Discord</span><span class="laurel-sub">SINCE 2021</span></span><svg class="laurel-side laurel-side--right" viewBox="0 0 420 802" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true"><use xlink:href="#laurel-branch"></use></svg></span>
+
+</div>
+
+**Verify that the people in your server actually own the email address they claim to.**
+A user enters their email, gets a 6-digit code, types it back, and a role is assigned. That's it.
+Built for university servers, employee groups, and any closed community where you want to know who's joining.
+{ .hero-lead }
+
+<div class="ev-cta" markdown>
+[:fontawesome-brands-discord: Add to your server](https://discord.com/api/oauth2/authorize?client_id=895056197789564969&permissions=268553344&scope=bot%20applications.commands){ .md-button .md-button--primary }
+[Quick start guide →](setup.md){ .md-button }
+[See pricing →](premium.md){ .md-button }
+</div>
+
+<!--
+  Organisations whose members verify with EmailVerify. Picked from the
+  2026-09-24 database: only servers whose allowed domains all belong to one
+  organisation count (a server mixing @amazon.com with @ubc.ca says nothing
+  about either), and only organisations with 75+ distinct verified members.
+  Government, military and NHS insignia are left out on purpose — their use is
+  legally restricted. Logos are two-tone (black ink, white knockouts) so one
+  file serves both schemes; see section 12 of extra.css.
+-->
+<section class="ev-orgs" aria-labelledby="ev-orgs-title">
+  <p class="ev-orgs-title" id="ev-orgs-title">Used by communities at</p>
+  <div class="ev-orgs-viewport">
+    <ul class="ev-orgs-track">
+    <li><img src="/assets/orgs/google.svg" alt="Google" width="111" height="34" style="--h: 1.68rem" decoding="async"></li>
+    <li><img src="/assets/orgs/harvard.svg" alt="Harvard University" width="117" height="32" style="--h: 1.61rem" decoding="async"></li>
+    <li><img src="/assets/orgs/microsoft.svg" alt="Microsoft" width="136" height="29" style="--h: 1.45rem" decoding="async"></li>
+    <li><img src="/assets/orgs/stanford.svg" alt="Stanford University" width="137" height="29" style="--h: 1.44rem" decoding="async"></li>
+    <li><img src="/assets/orgs/berkeley.svg" alt="UC Berkeley" width="109" height="34" style="--h: 1.71rem" decoding="async"></li>
+    <li><img src="/assets/orgs/riotgames.svg" alt="Riot Games" width="89" height="39" style="--h: 1.97rem" decoding="async"></li>
+    <li><img src="/assets/orgs/columbia.svg" alt="Columbia University" width="165" height="25" style="--h: 1.26rem" decoding="async"></li>
+    <li><img src="/assets/orgs/cornell.svg" alt="Cornell University" width="170" height="23" style="--h: 1.14rem" decoding="async"></li>
+    <li><img src="/assets/orgs/akamai.svg" alt="Akamai" width="93" height="38" style="--h: 1.9rem" decoding="async"></li>
+    <li><img src="/assets/orgs/caltech.svg" alt="Caltech" width="127" height="31" style="--h: 1.53rem" decoding="async"></li>
+    <li><img src="/assets/orgs/cmu.svg" alt="Carnegie Mellon University" width="170" height="15" style="--h: 0.76rem" decoding="async"></li>
+    <li><img src="/assets/orgs/honda.svg" alt="Honda" width="169" height="22" style="--h: 1.08rem" decoding="async"></li>
+    <li><img src="/assets/orgs/nyu.svg" alt="New York University" width="103" height="35" style="--h: 1.76rem" decoding="async"></li>
+    <li><img src="/assets/orgs/ucla.svg" alt="UCLA" width="106" height="35" style="--h: 1.74rem" decoding="async"></li>
+    <li><img src="/assets/orgs/creditmutuel.svg" alt="Crédit Mutuel" width="170" height="23" style="--h: 1.13rem" decoding="async"></li>
+    <li><img src="/assets/orgs/gatech.svg" alt="Georgia Tech" width="132" height="30" style="--h: 1.48rem" decoding="async"></li>
+    <li><img src="/assets/orgs/northwestern.svg" alt="Northwestern University" width="170" height="23" style="--h: 1.14rem" decoding="async"></li>
+    <li><img src="/assets/orgs/duke.svg" alt="Duke University" width="90" height="39" style="--h: 1.96rem" decoding="async"></li>
+    <li><img src="/assets/orgs/umich.svg" alt="University of Michigan" width="142" height="28" style="--h: 1.41rem" decoding="async"></li>
+    <li><img src="/assets/orgs/illinois.svg" alt="University of Illinois Urbana-Champaign" width="149" height="27" style="--h: 1.36rem" decoding="async"></li>
+    <li><img src="/assets/orgs/purdue.svg" alt="Purdue University" width="151" height="27" style="--h: 1.35rem" decoding="async"></li>
+    <li><img src="/assets/orgs/utexas.svg" alt="The University of Texas at Austin" width="115" height="33" style="--h: 1.64rem" decoding="async"></li>
+    <li><img src="/assets/orgs/imperial.svg" alt="Imperial College London" width="117" height="32" style="--h: 1.61rem" decoding="async"></li>
+    <li><img src="/assets/orgs/ucl.svg" alt="University College London" width="116" height="33" style="--h: 1.63rem" decoding="async"></li>
+    <li><img src="/assets/orgs/kuleuven.svg" alt="KU Leuven" width="101" height="36" style="--h: 1.8rem" decoding="async"></li>
+    <li><img src="/assets/orgs/polytechnique.svg" alt="École Polytechnique" width="106" height="35" style="--h: 1.73rem" decoding="async"></li>
+    <li><img src="/assets/orgs/utoronto.svg" alt="University of Toronto" width="100" height="36" style="--h: 1.8rem" decoding="async"></li>
+    <li><img src="/assets/orgs/unsw.png" alt="UNSW Sydney" width="91" height="39" style="--h: 1.94rem" decoding="async"></li>
+    <li><img src="/assets/orgs/uwaterloo.svg" alt="University of Waterloo" width="169" height="21" style="--h: 1.04rem" decoding="async"></li>
+    <!-- Second copy: the track scrolls by exactly half its width, so this is what makes the loop seamless. -->
+    <li aria-hidden="true"><img src="/assets/orgs/google.svg" alt="" width="111" height="34" style="--h: 1.68rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/harvard.svg" alt="" width="117" height="32" style="--h: 1.61rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/microsoft.svg" alt="" width="136" height="29" style="--h: 1.45rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/stanford.svg" alt="" width="137" height="29" style="--h: 1.44rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/berkeley.svg" alt="" width="109" height="34" style="--h: 1.71rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/riotgames.svg" alt="" width="89" height="39" style="--h: 1.97rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/columbia.svg" alt="" width="165" height="25" style="--h: 1.26rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/cornell.svg" alt="" width="170" height="23" style="--h: 1.14rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/akamai.svg" alt="" width="93" height="38" style="--h: 1.9rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/caltech.svg" alt="" width="127" height="31" style="--h: 1.53rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/cmu.svg" alt="" width="170" height="15" style="--h: 0.76rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/honda.svg" alt="" width="169" height="22" style="--h: 1.08rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/nyu.svg" alt="" width="103" height="35" style="--h: 1.76rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/ucla.svg" alt="" width="106" height="35" style="--h: 1.74rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/creditmutuel.svg" alt="" width="170" height="23" style="--h: 1.13rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/gatech.svg" alt="" width="132" height="30" style="--h: 1.48rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/northwestern.svg" alt="" width="170" height="23" style="--h: 1.14rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/duke.svg" alt="" width="90" height="39" style="--h: 1.96rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/umich.svg" alt="" width="142" height="28" style="--h: 1.41rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/illinois.svg" alt="" width="149" height="27" style="--h: 1.36rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/purdue.svg" alt="" width="151" height="27" style="--h: 1.35rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/utexas.svg" alt="" width="115" height="33" style="--h: 1.64rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/imperial.svg" alt="" width="117" height="32" style="--h: 1.61rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/ucl.svg" alt="" width="116" height="33" style="--h: 1.63rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/kuleuven.svg" alt="" width="101" height="36" style="--h: 1.8rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/polytechnique.svg" alt="" width="106" height="35" style="--h: 1.73rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/utoronto.svg" alt="" width="100" height="36" style="--h: 1.8rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/unsw.png" alt="" width="91" height="39" style="--h: 1.94rem" decoding="async"></li>
+    <li aria-hidden="true"><img src="/assets/orgs/uwaterloo.svg" alt="" width="169" height="21" style="--h: 1.04rem" decoding="async"></li>
+    </ul>
+  </div>
+  <p class="ev-orgs-note">Student, alumni and employee servers at these organizations verify their members with EmailVerify. Logos are trademarks of their owners and don't imply endorsement.</p>
+</section>
+
+---
+
+## See it in 60 seconds
+
+<div class="ev-video">
+  <img src="/assets/video-thumb.jpg" alt="Video: setting up EmailVerify in a Discord server" width="1280" height="720" loading="lazy">
+  <button class="ev-video-btn" type="button" data-ev-video="LMWu3Ui2IAk" data-ev-title="EmailVerify — Email Verification for Discord Servers (Setup in 60 Seconds)">
+    <span class="ev-video-play" aria-hidden="true"></span>
+    <span class="ev-video-text">
+      <span class="ev-video-caption">Watch the 60-second setup walkthrough</span>
+      <span class="ev-video-note">Click to play · loads from YouTube</span>
+    </span>
+  </button>
+</div>
+
+Prefer to read? The [quick start guide](setup.md) covers the same three steps.
+
+---
+
+## Live numbers
+
+<div class="ev-figures">
+  <div class="ev-figure">
+    <span class="ev-figure-value" id="serverCount">…</span>
+    <span class="ev-figure-label">Discord servers</span>
+    <span class="ev-figure-sub">running the bot right now</span>
+  </div>
+  <div class="ev-figure">
+    <span class="ev-figure-value" id="verifiedAll">…</span>
+    <span class="ev-figure-label">Members verified</span>
+    <span class="ev-figure-sub"><span id="verifiedToday">…</span> today</span>
+  </div>
+  <div class="ev-figure">
+    <span class="ev-figure-value" id="emailsAll">…</span>
+    <span class="ev-figure-label">Emails delivered</span>
+    <span class="ev-figure-sub"><span id="emailsToday">…</span> today</span>
+  </div>
+</div>
+
+[Detailed statistics →](statistics.md)
+
+---
+
+## Who it's for
+
+<div class="grid cards ev-grid-3" markdown>
+
+- :material-school:{ .lg .middle } __Universities & schools__
+
+    ---
+
+    Gate a course, faculty or society server behind `@*.edu` or your own institution's domain, and split students from staff automatically.
+
+    [:octicons-arrow-right-24: Discord verification for universities](use-cases/university.md)
+
+- :material-office-building:{ .lg .middle } __Companies & teams__
+
+    ---
+
+    Restrict an internal or partner server to people with a working company mailbox, with an audit trail of who verified and when.
+
+    [:octicons-arrow-right-24: Discord verification for companies](use-cases/company.md)
+
+- :material-ticket-confirmation:{ .lg .middle } __Courses, events & hackathons__
+
+    ---
+
+    Upload a CSV of registrants or paying students and let only those exact addresses through — no domain in common required.
+
+    [:octicons-arrow-right-24: Verification for paid and ticketed communities](use-cases/communities.md)
+
+</div>
+
+---
+
+## What it does
+
+<div class="grid cards" markdown>
+
+- :material-email-check:{ .lg .middle } __Verify by email code__
+
+    ---
+
+    The user enters their address, the bot sends a 6-digit code, the user types it back. No external account, no OAuth, no extra steps.
+
+- :material-shield-key:{ .lg .middle } __Restrict by domain__
+
+    ---
+
+    Allow `@*.edu`, `@yourcompany.com`, exact addresses, or any combination. Wildcards supported. Default is "any valid email" so small servers don't need to configure anything.
+
+- :material-account-multiple-check:{ .lg .middle } __Domain-specific roles__
+
+    ---
+
+    `@students.uni.edu` gets the Student role, `@staff.uni.edu` gets the Staff role, everyone gets a default Verified role. As granular as you need.
+
+- :material-file-upload:{ .lg .middle } __CSV allowlist (Pro)__
+
+    ---
+
+    Upload a CSV of specific addresses for invite-only servers. Hashed at rest, so even you can't read them back.
+
+- :material-bell-ring:{ .lg .middle } __Quota reminders__
+
+    ---
+
+    Like a phone plan: warnings at 80%, 95%, and 100% of your monthly send limit — with a run-out forecast and a count of members turned away once it's hit. Sent to whoever you want — owner DM, channel, or specific admin.
+
+- :material-shield-lock:{ .lg .middle } __Privacy-first storage__
+
+    ---
+
+    Email addresses are stored only as cryptographic hashes. The plaintext exists only at the moment of sending the verification code. GDPR-compliant.
+
+</div>
+
+---
+
+## How setup works
+
+<div class="ev-steps" markdown>
+
+<div class="ev-step" markdown>
+**Invite the bot and run `/setup`.**
+A short wizard creates the verified role for you (or uses yours), sets the allowed domains, and posts the verification button in the channel you pick.
+</div>
+
+<div class="ev-step" markdown>
+**Check delivery with `/testmail`.**
+Sends a real verification mail to an address you pick, so you find out about a spam-folder problem before your members do.
+</div>
+
+<div class="ev-step" markdown>
+**Post the button with `/button`.**
+Members click it, verify, and get their role. Nothing else for you to run.
+</div>
+
+</div>
+
+[Full quick start →](setup.md){ .md-button }
+[All commands →](commands.md){ .md-button }
+
+---
+
+## Free for almost everyone
+
+Every server gets **25 verification emails per month**, no setup needed. Looking at usage stats from the past few months, **about 95% of servers send 25 or fewer per month** — so for nearly everyone reading this, the bot keeps working completely free.
+
+If you do hit the limit, you'll get warnings at 80% and 95% before sending pauses. From there, [credit packs or a subscription](premium.md) takes over.
+
+[See pricing →](premium.md){ .md-button .md-button--primary }
+[How it compares to other bots →](compare.md){ .md-button }
+
+---
+
+## Built for transparency
+
+This is a single-developer project that has been running on personal infrastructure for the past five years. The source code stays open under AGPL-3.0 — fork it, audit it, self-host it. Premium routes through Zoho ZeptoMail (EU servers, GDPR-friendly) for paying servers; free-tier mail keeps using the operator's own SMTP.
+
+<div class="grid" markdown>
+
+- [:material-source-branch: GitHub repository](https://github.com/lkaesberg/EmailVerify)
+- [:material-shield-check-outline: Privacy policy](legal/datenschutz.md)
+- [:material-file-document-outline: Terms](legal/terms.md)
+- [:material-information-outline: Impressum](legal/impressum.md)
+
+</div>
+
+---
+
+## Common questions
+
+??? question "How does email verification on Discord actually work?"
+    The member clicks a button in your server and types their email address into a popup. The bot sends a 6-digit code to that address; entering the code back in Discord proves they control the mailbox, and the configured role is assigned. There is no external account to create and no OAuth consent screen.
+
+??? question "Can I restrict my Discord server to university students?"
+    Yes. Add `@*.edu` to accept any US university address, or a specific domain like `@students.uni-example.de`. You can map several domains to several roles, so staff and students end up separated automatically. See the [university guide](use-cases/university.md).
+
+??? question "Does the bot store email addresses?"
+    Only as cryptographic hashes. The plaintext exists just long enough to send the code — it is never written to disk. A database compromise cannot reveal your members' addresses.
+
+??? question "Can I self-host it?"
+    Yes, it's AGPL-3.0 with a prebuilt Docker image. Bring your own SMTP credentials and the quota system doesn't apply. Instructions are in the [repository README](https://github.com/lkaesberg/EmailVerify#-self-hosting).
+
+??? question "What if a member never receives the code?"
+    The "Code Sent" message has a **Resend code** button with a 60-second cooldown. If mail is landing in spam for everyone, run `/testmail` — most of the time it's a filter on the recipient's side, and paid plans route through Zoho ZeptoMail for noticeably better inbox placement.
+
+---
+
+## Built with
+
+<div class="ev-builtwith">
+<a href="https://discord.com/"><img src="https://raw.githubusercontent.com/lkaesberg/EmailBot/main/images/discord.png" alt="Discord" title="Discord"></a>
+<a href="https://nodejs.org/"><img src="https://raw.githubusercontent.com/lkaesberg/EmailBot/main/images/node.png" alt="Node.js" title="Node.js"></a>
+<a href="https://www.npmjs.com/"><img class="is-small" src="https://raw.githubusercontent.com/lkaesberg/EmailBot/main/images/npm.png" alt="npm" title="npm"></a>
+<a href="https://discord.js.org/"><img src="https://raw.githubusercontent.com/lkaesberg/EmailBot/main/images/djs.png" alt="Discord.js" title="Discord.js"></a>
+<a href="https://nodemailer.com/"><img class="is-small" src="https://raw.githubusercontent.com/lkaesberg/EmailBot/main/images/nodemailer.webp" alt="Nodemailer" title="Nodemailer"></a>
+<a href="https://www.zoho.com/zeptomail/"><img class="is-wordmark" src="/assets/zeptomail-logo.svg" alt="Zoho ZeptoMail" title="Zoho ZeptoMail (Pro delivery)"></a>
+</div>
+
+<script>
+(function () {
+'use strict';
+// Mirrors the pattern in statistics.md. Two things break a naive version under
+// MkDocs Material's `navigation.instant`:
+//
+//  1. The script is re-executed after the body is swapped in, so top-level
+//     `const` declarations throw "already been declared" on the second visit
+//     and the whole block dies — which is why the numbers stayed as "…" when
+//     you came back to the home page. Hence the IIFE.
+//  2. Element references captured on the first visit point at detached nodes
+//     after the swap, so look them up on every write, and clear the previous
+//     page's timer instead of stacking a second one.
+const API_BASE = 'https://stats.getemailverified.com';
+
+function setValue(id, value) {
+  const el = document.getElementById(id);
+  if (el && typeof value === 'number') el.textContent = value.toLocaleString();
+}
+
+function refreshData() {
+  // The interval can outlive a navigation away from this page.
+  if (!document.getElementById('serverCount')) return;
+  fetch(`${API_BASE}/stats/current`)
+    .then(response => response.json())
+    .then(data => {
+      setValue('serverCount', data.serverCount);
+      setValue('verifiedToday', data.usersVerifiedToday);
+      setValue('verifiedAll', data.usersVerifiedAll);
+      setValue('emailsToday', data.mailsSendToday);
+      setValue('emailsAll', data.mailsSendAll);
+    })
+    .catch(() => {});
+}
+
+function initLiveNumbers() {
+  if (!document.getElementById('serverCount')) return;
+  refreshData();
+  if (window.__liveNumbersTimer) clearInterval(window.__liveNumbersTimer);
+  window.__liveNumbersTimer = setInterval(refreshData, 10000);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initLiveNumbers);
+} else {
+  initLiveNumbers();
+}
+})();
+</script>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><g id="laurel-branch" fill="currentColor"><path d="m334.46 49.002c-18.278 12.277-38.479 27.48-54.76 44.437-28.887 30.086-57.536 64.004-82.159 97.941-16.634 22.926-38.215 57.715-50.006 83.305-15.691 34.056-24.985 57.915-33.597 95.332-12.132 52.713-10.459 106.81 1.863 157.81 18.129 75.031 76.15 137.81 134.13 188.77 45.358 39.863 106.34 65.942 159.92 85.098l5.5363-14.63c-53.09-18.97-109.36-44.31-152.83-82.56-55.92-49.21-107.57-109.22-129.85-180.73-13.57-43.53-16.72-91.29-9.6-137.54 6.2375-40.516 21.918-81.121 37.193-118.04 12.558-30.349 27.2-53.991 45.06-78.892 22.645-31.574 47.529-62.365 73.981-90.48 17.123-18.199 40.023-34.629 58.415-46.982z"></path><path d="m311.24 756.98s-37.634-11.898-67.5-8.3929c-47.415 5.5642-51.786 35-51.786 35s19.022 11.809 59.821 7.3214c47.796-5.2574 59.464-33.929 59.464-33.929z"></path><path d="m247.15 713.02s-31.716-15.044-61.786-14.821c-52.058 0.38562-55.179 28.036-55.179 28.036s18.843 13.595 60.536 13.036c48.08-0.64498 56.429-26.25 56.429-26.25z"></path><path d="m199.74 666.79s-30.157-26.43-59.326-33.739c-50.498-12.653-67.224 16.73-67.224 16.73s18.771 22.52 59.277 32.411c46.711 11.406 67.273-15.402 67.273-15.402z"></path><path d="m146.2 595.58s-25.79-27.185-61.094-38.032c-46.073-14.156-67.729 13.636-68.361 14.331 0 0 18.879 23.762 58.267 34.179 52.832 13.973 71.188-10.478 71.188-10.478z"></path><path d="m120.7 538.91s-24.019-36.576-59.844-53.84c-34.801-16.78-60.225-2.49-60.856-1.93 0 0 17.877 32.67 50.767 48.325 44.687 21.271 69.938 7.4411 69.938 7.4412z"></path><path d="m112.96 489.18c-12.82-12.06-13.775-44.84-32.099-71.44-25.563-37.11-67.73-34.42-68.361-34.07 0 0 4.5142 46.234 36.481 74.178 33.973 29.697 63.978 31.335 63.978 31.335z"></path><path d="m109.42 411.25s1.2445-40.185-9.3525-70.701c-14.783-42.569-55.138-50.926-55.839-50.759 0 0-6.5444 45.519 16.848 80.952 24.861 37.657 48.344 40.507 48.344 40.507z"></path><path d="m126.51 335.94s8.0495-33.735 3.9716-65.78c-6.1462-48.297-43.73-58.521-44.448-58.451 0 0-12.884 44.733 5.4449 83.031 19.479 40.702 35.031 41.2 35.031 41.2z"></path><path d="m159.62 255.08s13.089-30.516 11.412-62.775c-2.3279-44.771-32.665-63.685-33.385-63.711 0 0-29.251 26.374-12.451 83.145 10.191 34.437 34.425 43.342 34.425 43.342z"></path><path d="m201.74 188.6s19.451-29.962 24.832-61.814c5.0517-29.903-7.0803-62.481-9.7885-65.475 0 0-31.65 13.91-30.465 67.294 0.79711 35.905 15.422 59.995 15.422 59.995z"></path><path d="m253.49 124.45s23.192-24.697 29.233-58.466c5-27.984-0.04-58.394-5.31-65.984 0 0-30.25 18.795-32.448 66.327-1.6587 35.875 6.1262 52.95 8.5253 58.127z"></path><path d="m291.03 85.107s44.199 1.5969 66.166-11.157c24.589-14.276 48.719-45.263 50.623-54.309 0 0-38.712-16.975-74.806 14.032-27.242 23.402-39.862 46.137-41.983 51.434z"></path><path d="m242.33 138.43s21.141-24.752 57.469-31.147c28.002-4.9287 49.529-0.37797 63.35 7.6753 0 0-21.322 27.318-62.19 31.084-35.762 3.2949-53.376-5.3854-58.63-7.6124z"></path><path d="m198.64 195.5s20.13-23.742 56.459-30.136c28.002-4.9287 41.448 0.12711 55.269 8.1804 0 0-17.029 26.056-57.897 29.821-35.762 3.2949-48.578-5.638-53.832-7.8649z"></path><path d="m156.23 269.95s18.805-29.262 52.808-43.562c34.843-14.654 52.739-7.6569 67.725-2.0626-4.7791 7.1686-24.337 37.05-56.046 46.02-34.557 9.7763-58.932 0.90881-64.487-0.39556z"></path><path d="m131.06 336.07s16.664-30.532 49.556-47.228c33.706-17.109 52.056-11.41 67.404-6.9021-4.254 7.4921-21.624 38.696-52.61 49.912-33.77 12.223-58.716 5.1223-64.35 4.2186z"></path><path d="m117.84 414.65c14.421-18.489 22.261-38.366 44.449-58.149 27.336-24.373 50.792-16.603 66.711-15.029-7.8365 14.719-19.603 38.003-43.92 55.546-29.126 21.011-61.536 17.473-67.24 17.633z"></path><path d="m119.63 487.05c12.262-19.986 18.081-35.565 37.916-57.707 24.437-27.278 47.605-22.435 63.6-22.652-6.1404 15.503-16.49 38.695-38.692 58.849-26.592 24.138-57.175 20.713-62.824 21.51z"></path><path d="m135.4 544.78c18.448-28.481 16.12-34.927 34.176-58.542 19.392-25.362 43.885-24.665 59.811-26.165-4.8772 15.946-12.165 37.517-32.837 59.237-22.045 23.163-44.975 20.181-61.149 25.47z"></path><path d="m165.71 601.35c11.63-25.198 9.6219-40.933 20.286-58.794 17.442-29.213 34.541-30.474 50.467-31.973-12.703 36.396-9.762 36.564-23.746 58.732-13.607 21.571-32.096 24.474-47.007 32.036z"></path><path d="m202.25 648.92c6.628-26.95-0.10184-35.197 6.973-54.76 11.571-31.996 28.119-36.484 43.469-40.983-1.7651 21.479 0.89983 35.106-11.139 58.387-8.5015 16.44-26.101 27.098-39.303 37.356z"></path><path d="m275.9 596.01s13.293 25.664 8.8773 55.408c-6.2559 42.144-28.777 48.458-28.777 48.458s-12.827-19.155-11.523-58.022c1.3924-41.516 31.423-45.845 31.423-45.845z"></path><path d="m323.88 638.94s13.303 25.984 10.393 55.914c-3.7305 38.356-24.736 47.953-24.736 47.953s-13.232-21.412-13.796-53.728c-0.86041-49.346 28.14-50.138 28.14-50.138z"></path></g></defs></svg>

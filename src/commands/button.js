@@ -1,0 +1,96 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2021-2026 Lars Benedikt Kaesberg
+//
+// This file is part of EmailVerify, a Discord email verification bot.
+// EmailVerify is free software: you can redistribute it and/or modify it under
+// the terms of the GNU Affero General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option) any
+// later version. See the LICENSE file for details.
+
+const {SlashCommandBuilder} = require("@discordjs/builders");
+const database = require("../database/Database");
+const {ChannelType} = require('discord.js');
+const { MessageFlags } = require('discord.js');
+const {getLocale} = require("../Language");
+const {buildVerifyEmbed, buildVerifyButtons} = require("../bot/verifyMessage");
+
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setDefaultPermission(true)
+        .setName('button')
+        .setDescription("Create a verification button embed in a channel for users to verify")
+        .addChannelOption(option => option
+            .setName("channel")
+            .setRequired(true)
+            .setDescription("Channel where the verification embed will be posted")
+            .addChannelTypes(
+                ChannelType.GuildText,
+                ChannelType.GuildAnnouncement,
+                ChannelType.PublicThread,
+                ChannelType.PrivateThread,
+                ChannelType.AnnouncementThread,
+            ))
+        .addStringOption(option => option
+            .setName("buttontext")
+            .setRequired(true)
+            .setMaxLength(80)
+            .setDescription("Text shown on the verify button (max 80 chars, e.g. 'Click to Verify')"))
+        .addStringOption(option => option
+            .setName("title")
+            .setRequired(false)
+            .setDescription("Custom title for the embed (default: localized verify title)"))
+        .addStringOption(option => option
+            .setName("message")
+            .setRequired(false)
+            .setDescription("Custom description/instructions (default: localized instructions)"))
+        .addStringOption(option => option
+            .setName("color")
+            .setRequired(false)
+            .setDescription("Embed accent color in hex format (e.g. #5865F2, #FF0000)"))
+        .setDefaultMemberPermissions(0),
+    async execute(interaction) {
+        const rawButtonText = interaction.options.getString("buttontext", true)
+        const buttonText = rawButtonText.substring(0, 80)
+        const channel = interaction.options.getChannel("channel", true)
+        const customMessage = interaction.options.getString("message")
+        const customTitle = interaction.options.getString("title")
+        const customColor = interaction.options.getString("color")
+
+        await interaction.deferReply({flags: MessageFlags.Ephemeral})
+
+        if (typeof channel?.send !== "function") {
+            await interaction.editReply({content: "That channel type can't receive messages. Please pick a text channel, announcement channel, or thread.", flags: MessageFlags.Ephemeral})
+            return
+        }
+
+        await database.getServerSettings(interaction.guildId, async serverSettings => {
+            const language = serverSettings.language
+
+            // Parse color or use default Discord blurple
+            let embedColor = null
+            if (customColor) {
+                const parsed = customColor.replace('#', '')
+                if (/^[0-9A-Fa-f]{6}$/.test(parsed)) {
+                    embedColor = parseInt(parsed, 16)
+                }
+            }
+
+            const embed = buildVerifyEmbed(interaction.guild, language, {
+                title: customTitle,
+                description: customMessage,
+                color: embedColor ?? undefined
+            })
+            const buttons = buildVerifyButtons(language, buttonText);
+
+            const message = await channel.send({embeds: [embed], components: [buttons]}).catch(async _ => {
+                await interaction.user.send("No permissions to write in that channel!").catch(async _ => {
+                })
+            })
+            if (message === undefined) {
+                return
+            }
+
+            await interaction.editReply({content: getLocale(language, "buttonCreated"), flags: MessageFlags.Ephemeral})
+        })
+    }
+}

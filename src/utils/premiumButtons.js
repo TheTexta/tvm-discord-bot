@@ -1,0 +1,185 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright (C) 2021-2026 Lars Benedikt Kaesberg
+//
+// This file is part of EmailVerify, a Discord email verification bot.
+// EmailVerify is free software: you can redistribute it and/or modify it under
+// the terms of the GNU Affero General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option) any
+// later version. See the LICENSE file for details.
+
+const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js')
+const config = require('../../config/config.json')
+const { getLocale } = require('../Language')
+
+const skus = config.monetization?.skus || {}
+const prices = config.monetization?.prices || {}
+const currency = config.monetization?.currency || 'EUR'
+const appId = config.clientId
+const websiteUrl = (config.websiteUrl || '').trim()
+// Where people get help. Defaults to the project's own support server, which also serves
+// self-hosters; set "supportUrl": "" in config to hide every support link.
+const supportUrl = (config.supportUrl ?? 'https://discord.gg/fEBSHUQXu2').trim()
+
+// Reverse map: Discord SKU snowflake → operator-facing product metadata. Built
+// once from config so logs and notifications can show "⭐ Standard subscription"
+// instead of a raw SKU id. Unset/empty SKU ids in config are skipped, so an
+// unconfigured product never collides on an empty-string key.
+const SKU_CATALOG = {}
+function registerSku(skuId, meta) {
+    if (typeof skuId === 'string' && skuId.trim().length > 0) SKU_CATALOG[skuId] = meta
+}
+registerSku(skus.subscriptionTier1, { label: '⭐ Standard subscription', kind: 'subscription', tier: 'tier1', price: prices.subscriptionTier1 })
+registerSku(skus.subscriptionTier2, { label: '💎 Pro subscription', kind: 'subscription', tier: 'tier2', price: prices.subscriptionTier2 })
+registerSku(skus.credits100, { label: '🎟️ 100 Credit Pack', kind: 'credits', credits: 100, price: prices.credits100 })
+registerSku(skus.credits500, { label: '🎟️ 500 Credit Pack', kind: 'credits', credits: 500, price: prices.credits500 })
+registerSku(skus.credits2000, { label: '🎟️ 2,000 Credit Pack', kind: 'credits', credits: 2000, price: prices.credits2000 })
+registerSku(skus.csvUnlock, { label: '📁 CSV unlock', kind: 'csv', price: prices.csvUnlock })
+
+/**
+ * Resolve a SKU id to its operator-facing product info.
+ * @param {string} skuId
+ * @returns {{label:string, kind:'subscription'|'credits'|'csv', tier?:'tier1'|'tier2', credits?:number}|null}
+ */
+function describeSku(skuId) {
+    return SKU_CATALOG[skuId] || null
+}
+
+function getWebsiteUrl() {
+    return websiteUrl || null
+}
+
+function getSupportUrl() {
+    return supportUrl || null
+}
+
+/**
+ * A link on the website, tagged with where in the bot it was clicked, so site analytics
+ * can tell the bot's own traffic apart. Null when no website is configured.
+ */
+function websiteLink(path, medium) {
+    if (!websiteUrl) return null
+    const base = websiteUrl.replace(/\/$/, '')
+    return `${base}/${path.replace(/^\//, '')}?utm_source=bot&utm_medium=${encodeURIComponent(medium)}`
+}
+
+/**
+ * "Get EmailVerify for your server" on a member's verification success message. Every
+ * verification shows the bot to someone who may run a community of their own; paying
+ * servers don't carry the link.
+ */
+function buildGetBotRow(language) {
+    const url = websiteLink('', 'verify_success')
+    if (!url) return null
+    return new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setStyle(ButtonStyle.Link)
+            .setLabel(getLocale(language, 'verifySuccessGetBot'))
+            .setEmoji('✉️')
+            .setURL(url)
+    )
+}
+
+/** Configured billing currency (ISO code, e.g. 'EUR'). Used to label revenue analytics. */
+function getCurrency() {
+    return currency
+}
+
+/**
+ * Build a public Discord store URL for a SKU.
+ * Useful for hyperlink fallbacks when a Premium button can't be rendered.
+ */
+function storeUrl(skuId) {
+    if (!appId || !skuId) return null
+    return `https://discord.com/application-directory/${appId}/store/${skuId}`
+}
+
+function appStoreUrl() {
+    if (!appId) return null
+    return `https://discord.com/application-directory/${appId}/store`
+}
+
+/**
+ * Localized "on mobile? Premium buttons only work on desktop/browser" line with a
+ * store link. Discord's mobile apps can't complete SKU purchases, so every message
+ * that shows buy buttons should carry this hint. Returns null when no app id is
+ * configured (no store link to offer).
+ */
+function mobileHintLine(language) {
+    const link = appStoreUrl()
+    if (!link) return null
+    return getLocale(language || 'english', 'premiumMobileHint', link)
+}
+
+function premiumButton(skuId) {
+    return new ButtonBuilder().setStyle(ButtonStyle.Premium).setSKUId(skuId)
+}
+
+/**
+ * Build action rows offering relevant SKUs as Premium buttons.
+ *
+ * @param {{ subscriptionTier: 'tier1'|'tier2'|null, csvUnlocked: boolean }} status
+ * @param {{ context?: 'status'|'mailLimit'|'csvRequired'|'quotaWarn' }} [opts]
+ * @returns {ActionRowBuilder[]} 0-2 rows of Premium buttons (≤5 per row)
+ */
+function buildPlanButtons(status, opts = {}) {
+    const context = opts.context || 'status'
+    const tier = status.subscriptionTier
+    const hasCsv = !!status.csvUnlocked || tier === 'tier2'
+
+    // Contexts where only Tier 2 unblocks what the user just tried to do, so
+    // offering Tier 1 (or the CSV unlock, below) would sell them something that
+    // does not help.
+    const tier2OnlyContext = context === 'csvRequired' || context === 'apiRequired'
+
+    const subscriptions = []
+    if (!tier2OnlyContext && !tier && skus.subscriptionTier1) {
+        subscriptions.push(skus.subscriptionTier1)
+    }
+    if (tier !== 'tier2' && skus.subscriptionTier2) {
+        subscriptions.push(skus.subscriptionTier2)
+    }
+
+    const oneTime = []
+    // The CSV unlock deliberately does not grant API access, so it is not an answer
+    // to an apiRequired prompt either.
+    if (!hasCsv && context !== 'apiRequired' && skus.csvUnlock) oneTime.push(skus.csvUnlock)
+
+    // Panic contexts (limit hit / quota warning) keep the choice small: the impulse
+    // exits are the small packs; the 2,000 pack lives in the calmer /premium & /status
+    // views where a bulk buyer will look for it anyway.
+    const panicContext = context === 'mailLimit' || context === 'quotaWarn'
+    const credits = []
+    if (skus.credits100) credits.push(skus.credits100)
+    if (skus.credits500) credits.push(skus.credits500)
+    if (!panicContext && skus.credits2000) credits.push(skus.credits2000)
+
+    // CSV-required prompts shouldn't show credit packs (they're for email quota, not CSV).
+    // Mail-limit and quotaWarn prompts shouldn't show CSV unlock (it doesn't unblock email sends).
+    const includeCredits = context !== 'csvRequired' && context !== 'apiRequired'
+    const includeCsv = context !== 'mailLimit' && context !== 'quotaWarn' && context !== 'apiRequired'
+
+    const rows = []
+    const topRow = []
+    topRow.push(...subscriptions.map(premiumButton))
+    if (includeCsv) topRow.push(...oneTime.map(premiumButton))
+    if (topRow.length > 0) rows.push(new ActionRowBuilder().addComponents(topRow.slice(0, 5)))
+
+    if (includeCredits && credits.length > 0) {
+        rows.push(new ActionRowBuilder().addComponents(credits.slice(0, 5).map(premiumButton)))
+    }
+
+    return rows
+}
+
+module.exports = {
+    buildPlanButtons,
+    storeUrl,
+    appStoreUrl,
+    mobileHintLine,
+    getWebsiteUrl,
+    getSupportUrl,
+    websiteLink,
+    buildGetBotRow,
+    getCurrency,
+    describeSku
+}

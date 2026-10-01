@@ -1,0 +1,61 @@
+{
+    "token": "YOUR_DISCORD_BOT_TOKEN",
+    "clientId": "YOUR_DISCORD_CLIENT_ID",
+    "email": "verify@example.com",
+    "username": "smtp-username",
+    "password": "smtp-password",
+    "smtpHost": "smtp.example.com",
+    "smtpPort": 587,
+    "isSecure": false,
+    "isGoogle": false,
+    "topggToken": "",
+    "discordbotlistToken": "",
+    "discordbotsggToken": "",
+    "topggWebhookSecret": "",
+    "discordbotlistWebhookSecret": "",
+    "operatorWebhookUrl": "",
+    "websiteUrl": "",
+    "supportUrl": "https://discord.gg/fEBSHUQXu2",
+    "onboarding": {
+        "nudgeDelaysHours": [24, 72]
+    },
+    "apiBaseUrl": "https://stats.example.com/api/v1",
+    "monetization": {
+        "enabled": false,
+        "freeMonthlyLimit": 25,
+        "voteReward": {
+            "mails": 5,
+            "monthlyCap": 25
+        },
+        "currency": "EUR",
+        "skus": {
+            "subscriptionTier1": "",
+            "subscriptionTier2": "",
+            "credits100": "",
+            "credits500": "",
+            "credits2000": "",
+            "csvUnlock": ""
+        },
+        "prices": {
+            "subscriptionTier1": 0,
+            "subscriptionTier2": 0,
+            "credits100": 0,
+            "credits500": 0,
+            "credits2000": 0,
+            "csvUnlock": 0
+        }
+    },
+    "zeptomail": {
+        "enabled": false,
+        "apiToken": "Zoho-enczapikey YOUR_ZEPTOMAIL_TOKEN",
+        "endpoint": "https://api.zeptomail.eu/v1.1/email",
+        "fromAddress": "verify@yourdomain.example",
+        "fromName": "EmailVerify"
+    },
+    "posthog": {
+        "enabled": false,
+        "apiKey": "phc_YOUR_PROJECT_API_KEY",
+        "host": "https://eu.i.posthog.com",
+        "salt": ""
+    }
+}
