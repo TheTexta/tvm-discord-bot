@@ -14,6 +14,7 @@ test('requires a live roster, persists pending codes, and binds one Discord acco
     const guild = '123456789012345678'
     let store = new Store(filename, 'a'.repeat(32))
     try {
+        assert.equal(fs.statSync(filename).mode & 0o777, 0o600)
         assert.deepEqual(await store.status(guild), { meta: undefined, count: 0, unreconciled: 0 })
         await store.replaceRoster(guild, [
             { studentId: '001', email: 'one@example.org' },

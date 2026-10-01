@@ -8,7 +8,10 @@ const crypto = require('node:crypto')
 
 class Store {
     constructor(filename, codeSecret) {
+        process.umask(0o077)
         fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 })
+        fs.closeSync(fs.openSync(filename, 'a', 0o600))
+        fs.chmodSync(filename, 0o600)
         this.db = new sqlite3.Database(filename)
         this.codeSecret = codeSecret
         this.queue = Promise.resolve()
