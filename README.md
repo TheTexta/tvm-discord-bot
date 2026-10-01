@@ -43,11 +43,10 @@ Supply the required environment variables before `npm start`. There is deliberat
 ## Admin workflow
 
 1. Use `/testmail` to confirm delivery to a controlled inbox. Check junk as well as SMTP acceptance.
-2. Use `/roster replace` with a CSV containing **only currently eligible email addresses**. This atomically replaces the active roster, invalidates pending codes, and attempts to remove the configured membership role from removed members. Review the reported failures.
+2. Use `/roster replace` with a CSV containing **only currently eligible email addresses**. This atomically replaces the active roster, invalidates pending codes, and attempts to remove roles the bot granted to removed members. Review the reported failures. Existing role assignments made outside the bot are preserved.
 3. Use `/roster status` to check the active version, row count, and unreconciled removals. Use `/roster reconcile` until the unreconciled count is zero.
    Use `/roster audit` to review recent roster replacements and account transfers.
-   Reconciliation also removes the membership role from accounts without an active roster-backed claim, including manually granted roles.
-   A member update listener checks new role grants immediately; the hourly reconciliation catches missed events.
+   Reconciliation revisits removed bot claims and retries role revocations that failed. It does not remove roles assigned outside this bot.
 4. Use `/postverify` in the unverified members' channel. Use a normal account to test that member channels require the configured membership role.
 5. Use `/roster transfer` when a verified member changes Discord accounts. Both accounts must be in the server, and the target must not already claim another roster entry.
 6. If Discord could not confirm a role assignment, use `/roster repair` with that email's active claim after checking the bot's permissions.

@@ -140,7 +140,9 @@ async function checkCode(interaction) {
         return
     }
     await withMembershipLock(async () => {
-        const result = await store.verifyAndClaim(config.guildId, interaction.user.id, code)
+        const member = await interaction.guild.members.fetch(interaction.user.id)
+        const alreadyHadRole = member.roles.cache.has(config.memberRoleId)
+        const result = await store.verifyAndClaim(config.guildId, interaction.user.id, code, alreadyHadRole)
         if (!result.ok) {
             const message = result.reason === 'claimed'
                 ? 'This roster email is already linked to another account. Ask a TVM administrator for an account transfer.'
@@ -149,8 +151,7 @@ async function checkCode(interaction) {
             return
         }
         try {
-            const member = await interaction.guild.members.fetch(interaction.user.id)
-            await member.roles.add(config.memberRoleId)
+            if (!alreadyHadRole) await member.roles.add(config.memberRoleId)
         } catch (error) {
             // Discord may apply a role and lose the response. Keep the claim so an
             // ambiguous API failure can never leave an untracked member role.
@@ -173,34 +174,17 @@ async function reconcile(guild) {
                 if (error.code === 10007) return null
                 throw error
             })
-            if (member?.roles.cache.has(config.memberRoleId)) await member.roles.remove(config.memberRoleId)
+            if (claim.managed_role && member?.roles.cache.has(config.memberRoleId)) {
+                await member.roles.remove(config.memberRoleId)
+                revoked++
+            }
             await store.releaseRemovedClaim(config.guildId, claim.email, claim.user_id)
-            revoked++
         } catch (error) {
             console.error('[TVM] Role revocation failed:', error?.message || error)
             failed++
         }
     }
-    // Administrators can assign roles manually. The bot owns this one role, so
-    // remove it from any account without a current roster-backed claim too.
-    const authorizedUsers = await store.activeClaimUserIds(config.guildId)
-    let members
-    try {
-        members = await guild.members.fetch()
-    } catch (error) {
-        await alertAdmins('Role reconciliation could not fetch the server member list. Check Server Members Intent and bot access.')
-        throw error
-    }
-    for (const member of members.values()) {
-        if (!member.roles.cache.has(config.memberRoleId) || authorizedUsers.has(member.id)) continue
-        try {
-            await member.roles.remove(config.memberRoleId)
-            revoked++
-        } catch (error) {
-            console.error('[TVM] Unclaimed role revocation failed:', error?.message || error)
-            failed++
-        }
-    }
+    // Existing server role assignments are outside this bot's ownership.
     if (failed) await alertAdmins(`${failed} removed roster claim(s) still need role revocation. Run /roster reconcile.`)
     return { revoked, failed }
 }
@@ -250,7 +234,10 @@ async function handleRoster(interaction) {
             const claim = await store.claimFor(config.guildId, email)
             if (!roster || !claim) throw new Error('No active roster claim exists for that email')
             const member = await interaction.guild.members.fetch(claim.user_id)
-            await member.roles.add(config.memberRoleId)
+            if (!member.roles.cache.has(config.memberRoleId)) {
+                await store.markRoleManaged(config.guildId, email, claim.user_id)
+                await member.roles.add(config.memberRoleId)
+            }
             await privateReply(interaction, `Member role confirmed for <@${claim.user_id}>.`)
         })
         return
@@ -265,7 +252,9 @@ async function handleRoster(interaction) {
                 if (error.code === 10007) return null
                 throw error
             })
-            if (member?.roles.cache.has(config.memberRoleId)) await member.roles.remove(config.memberRoleId)
+            if (claim.managed_role && member?.roles.cache.has(config.memberRoleId)) {
+                await member.roles.remove(config.memberRoleId)
+            }
             await store.releaseClaim(config.guildId, email, interaction.user.id)
             await privateReply(interaction, `Claim released for <@${claim.user_id}>. They can verify again while on the active roster.`)
         })
@@ -284,15 +273,17 @@ async function handleRoster(interaction) {
                 if (error.code === 10007) return null
                 throw error
             })
-            if (oldMember) await oldMember.roles.remove(config.memberRoleId)
+            const targetAlreadyHadRole = targetMember.roles.cache.has(config.memberRoleId)
+            const oldRoleRemoved = Boolean(prior.managed_role && oldMember?.roles.cache.has(config.memberRoleId))
+            if (oldRoleRemoved) await oldMember.roles.remove(config.memberRoleId)
             try {
-                await store.transfer(config.guildId, email, target.id, interaction.user.id)
+                await store.transfer(config.guildId, email, target.id, interaction.user.id, targetAlreadyHadRole)
             } catch (error) {
-                if (oldMember) await oldMember.roles.add(config.memberRoleId).catch(() => {})
+                if (oldRoleRemoved) await oldMember.roles.add(config.memberRoleId).catch(() => {})
                 throw error
             }
             try {
-                await targetMember.roles.add(config.memberRoleId)
+                if (!targetAlreadyHadRole) await targetMember.roles.add(config.memberRoleId)
             } catch (error) {
                 await alertAdmins('An account transfer changed the claim, but the new role could not be confirmed. Use /roster repair after checking permissions.')
                 throw new Error('Claim transferred, but target role assignment could not be confirmed. Use /roster repair.')
@@ -333,27 +324,6 @@ client.once('clientReady', async () => {
         client.destroy()
         process.exit(1)
     }
-})
-
-client.on('guildMemberUpdate', (before, after) => {
-    if (after.guild.id !== config.guildId || !after.roles.cache.has(config.memberRoleId) ||
-        before.roles.cache.has(config.memberRoleId)) return
-    withMembershipLock(async () => {
-        let authorized = false
-        try {
-            authorized = await store.isAuthorizedUser(config.guildId, after.id)
-        } catch (error) {
-            console.error('[TVM] Could not check newly granted role:', error?.message || error)
-            await alertAdmins('Roster lookup failed while checking a member role grant. The role will be removed.')
-        }
-        if (!authorized) {
-            await after.roles.remove(config.memberRoleId)
-            await alertAdmins('The membership role was granted without an active roster claim and has been removed.')
-        }
-    }).catch(async error => {
-        console.error('[TVM] Could not remove unclaimed role:', error?.message || error)
-        await alertAdmins('Could not remove the membership role from an account without an active roster claim. Check bot permissions and run /roster reconcile.')
-    })
 })
 
 client.on('interactionCreate', async interaction => {

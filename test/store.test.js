@@ -6,6 +6,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const sqlite3 = require('sqlite3')
 const Store = require('../src/tvm/Store')
 
 test('requires a roster email, persists codes, and binds one Discord account', async () => {
@@ -45,10 +46,66 @@ test('requires a roster email, persists codes, and binds one Discord account', a
         await store.replaceRoster(guild, [{ email: 'two@example.org' }], 'admin')
         assert.deepEqual([...await store.activeClaimUserIds(guild)], [])
         assert.equal(await store.isAuthorizedUser(guild, 'user-b'), false)
-        assert.deepEqual(await store.removedClaims(guild), [{ email: 'one@example.org', user_id: 'user-b' }])
+        assert.deepEqual(await store.removedClaims(guild), [{ email: 'one@example.org', user_id: 'user-b', managed_role: 1 }])
         assert.equal(await store.releaseClaim(guild, 'one@example.org', 'admin'), 'user-b')
         assert.equal((await store.audit(guild))[0].action, 'claim_release')
         assert.deepEqual(await store.removedClaims(guild), [])
+    } finally {
+        await store.close()
+        fs.rmSync(dir, { recursive: true, force: true })
+    }
+})
+
+test('preserves pre-existing role ownership when an email claim is removed', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvm-store-'))
+    const store = new Store(path.join(dir, 'tvm.db'), 'c'.repeat(32))
+    const guild = '123456789012345678'
+    try {
+        await store.replaceRoster(guild, [{ email: 'existing@example.org' }], 'admin')
+        await store.savePending(guild, 'user-a', 'existing@example.org', '123456')
+        assert.equal((await store.verifyAndClaim(guild, 'user-a', '123456', true)).ok, true)
+        assert.equal((await store.claimFor(guild, 'existing@example.org')).managed_role, 0)
+        await store.replaceRoster(guild, [{ email: 'other@example.org' }], 'admin')
+        assert.deepEqual(await store.removedClaims(guild), [
+            { email: 'existing@example.org', user_id: 'user-a', managed_role: 0 }
+        ])
+    } finally {
+        await store.close()
+        fs.rmSync(dir, { recursive: true, force: true })
+    }
+})
+
+test('transfers and repairs can start managing a previously external role', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvm-store-'))
+    const store = new Store(path.join(dir, 'tvm.db'), 'e'.repeat(32))
+    const guild = '123456789012345678'
+    try {
+        await store.replaceRoster(guild, [{ email: 'existing@example.org' }], 'admin')
+        await store.savePending(guild, 'user-a', 'existing@example.org', '123456')
+        await store.verifyAndClaim(guild, 'user-a', '123456', true)
+        await store.transfer(guild, 'existing@example.org', 'user-b', 'admin', true)
+        assert.equal((await store.claimFor(guild, 'existing@example.org')).managed_role, 0)
+        await store.markRoleManaged(guild, 'existing@example.org', 'user-b')
+        assert.equal((await store.claimFor(guild, 'existing@example.org')).managed_role, 1)
+    } finally {
+        await store.close()
+        fs.rmSync(dir, { recursive: true, force: true })
+    }
+})
+
+test('adds role ownership to a database created by the first email-only release', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvm-store-'))
+    const filename = path.join(dir, 'tvm.db')
+    const db = new sqlite3.Database(filename)
+    await new Promise((resolve, reject) => db.exec(`CREATE TABLE email_claims (
+        guild_id TEXT NOT NULL, email TEXT NOT NULL, user_id TEXT NOT NULL, created_at INTEGER NOT NULL,
+        PRIMARY KEY (guild_id, email), UNIQUE (guild_id, user_id))`, error => error ? reject(error) : resolve()))
+    await new Promise((resolve, reject) => db.close(error => error ? reject(error) : resolve()))
+    const store = new Store(filename, 'd'.repeat(32))
+    try {
+        await store.ready
+        const columns = await store._all('PRAGMA table_info(email_claims)')
+        assert.equal(columns.some(column => column.name === 'managed_role'), true)
     } finally {
         await store.close()
         fs.rmSync(dir, { recursive: true, force: true })
