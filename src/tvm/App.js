@@ -218,7 +218,7 @@ async function handleRoster(interaction) {
     if (subcommand === 'audit') {
         const entries = await store.audit(config.guildId)
         await privateReply(interaction, entries.length ? entries.map(entry =>
-            `${new Date(entry.at).toISOString()} • ${entry.action} • by <@${entry.actor_id}> • ${entry.detail}`
+            `${new Date(entry.at).toISOString()} • ${entry.action} • by ${/^\d{17,20}$/.test(entry.actor_id) ? `<@${entry.actor_id}>` : entry.actor_id} • ${entry.detail}`
         ).join('\n').slice(0, 1900) : 'No roster or transfer actions recorded.')
         return
     }
@@ -302,7 +302,7 @@ async function handleRoster(interaction) {
     }
 }
 
-client.once('ready', async () => {
+client.once('clientReady', async () => {
     try {
         await store.ready
         const rest = new REST({ version: '10' }).setToken(config.token)

@@ -28,6 +28,8 @@ Check an export locally before uploading it. The checker prints row numbers and 
 npm run roster:check -- /path/to/eligible-members.csv
 ```
 
+For a new deployment, an operator with private host access can import the first roster directly into the persistent database with `node scripts/import-initial-roster.js /path/to/eligible-members.csv EXPECTED_COUNT` inside the application container. It refuses to replace an existing roster; use `/roster replace` for later updates. Remove the temporary CSV from the host and container after import.
+
 ## Run locally
 
 ```sh
