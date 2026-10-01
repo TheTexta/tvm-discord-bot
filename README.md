@@ -8,6 +8,8 @@ Only an email address in the current TVM roster can initiate verification. A mem
 
 Members can use `/source` to find the complete source of the deployed bot. Keep this repository public while operating the modified network service.
 
+Human members with only `@everyone` receive a mentionable `Unverified` role. The bot checks existing members on startup and hourly, and handles joins and role changes as they occur. It removes `Unverified` after verification or any other role assignment; members who already have another role and bots are excluded. Administrators can write their own message mentioning `@Unverified` to invite these members to verify. The bot does not post reminders automatically. Use `/roster reconcile` to retry failed assignments.
+
 Codes expire after 15 minutes, allow five attempts, and are stored as HMAC hashes. Requests are limited per Discord account and submitted email; sends also have a server-wide daily budget. Rate-limit events store an HMAC of the email. All verification replies are private. The roster, claims, pending codes, and rate-limit events live in SQLite at `TVM_DATABASE_PATH`.
 
 ## Configure
@@ -16,7 +18,9 @@ Requires Node.js 22+, a dedicated Discord application, a Resend API key, a verif
 
 Use a dedicated Resend key for this bot and leave open and click tracking disabled for verification email. A verified subdomain of an operator-controlled domain is sufficient until TVM DNS access is available; `onboarding@resend.dev` is only a test sender.
 
-Set the bot's role above all three configured roles and grant it Manage Roles, View Channels, Send Messages, and Use Application Commands. Enable Server Members Intent in the Discord Developer Portal. Install with `bot` and `applications.commands` scopes. Make a private administrator alert channel and configure `TVM_ADMIN_ALERT_CHANNEL_ID` for failures. The bot only registers commands in `TVM_GUILD_ID`.
+Set the bot's role above all three configured roles and `Unverified` and grant it Manage Roles, View Channels, Send Messages, and Use Application Commands. Enable Server Members Intent in the Discord Developer Portal. Install with `bot` and `applications.commands` scopes. Make a private administrator alert channel and configure `TVM_ADMIN_ALERT_CHANNEL_ID` for failures. The bot only registers commands in `TVM_GUILD_ID`.
+
+Optionally set `TVM_UNVERIFIED_ROLE_ID` to an existing role. Otherwise the bot reuses the single role named `Unverified`, or creates it with no permissions and mentions enabled. The role must have no permissions, be separate from the membership roles, and sit below the bot. Multiple roles with that name require an explicit ID.
 
 After filling `.env.local` locally, run `npm run discord:check` to check the application, member intent, server installation, role hierarchy, and alert-channel access without printing credentials. This check makes no Discord changes. It does not test mail delivery.
 

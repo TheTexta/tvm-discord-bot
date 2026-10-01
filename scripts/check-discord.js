@@ -15,6 +15,7 @@ const guildId = required('TVM_GUILD_ID')
 const memberRoleId = required('TVM_MEMBER_ROLE_ID')
 const execRoleId = required('TVM_EXEC_ROLE_ID')
 const adminRoleId = required('TVM_ADMIN_ROLE_ID')
+const unverifiedRoleId = process.env.TVM_UNVERIFIED_ROLE_ID?.trim()
 const alertChannelId = required('TVM_ADMIN_ALERT_CHANNEL_ID')
 const base = 'https://discord.com/api/v10'
 
@@ -75,6 +76,15 @@ async function main() {
     check('Bot is installed in the server', Boolean(member?.data))
     const targets = [memberRoleId, execRoleId, adminRoleId].map(id => roles.data?.find(role => role.id === id))
     check('Configured membership, executive, and admin roles exist', targets.every(Boolean))
+    const unverified = unverifiedRoleId
+        ? roles.data?.find(role => role.id === unverifiedRoleId)
+        : roles.data?.find(role => role.name === 'Unverified')
+    if (unverifiedRoleId || unverified) {
+        check('Unverified is a separate role with no permissions and mentions enabled', Boolean(unverified) &&
+            ![guildId, memberRoleId, execRoleId, adminRoleId].includes(unverified.id) &&
+            !unverified.managed && BigInt(unverified.permissions) === 0n && unverified.mentionable)
+        targets.push(unverified)
+    }
     const botRoles = roles.data?.filter(role => member?.data?.roles.includes(role.id)) || []
     const highest = Math.max(0, ...botRoles.map(role => role.position))
     let basePermissions = BigInt(roles.data?.find(role => role.id === guildId)?.permissions || 0)

@@ -10,6 +10,7 @@ const {
 const { loadConfig } = require('./config')
 const { parseRoster } = require('./roster')
 const Store = require('./Store')
+const UnverifiedRoleManager = require('./UnverifiedRoleManager')
 const SelfSmtpProvider = require('../mail/providers/SelfSmtpProvider')
 
 const config = loadConfig()
@@ -70,6 +71,8 @@ const commands = [
 const privateReply = (interaction, content, components = []) => interaction.editReply({ content, components })
 const roleKinds = ['member', 'exec', 'admin']
 const roleIds = { member: config.memberRoleId, exec: config.execRoleId, admin: config.adminRoleId }
+const unverifiedRoles = new UnverifiedRoleManager(config.guildId, config.unverifiedRoleId, Object.values(roleIds))
+let unverifiedReady = false
 const roleNames = { member: 'General Member', exec: 'Executives (Producers & Editors)', admin: 'Admin Team' }
 const managedColumns = { member: 'managed_role', exec: 'managed_exec_role', admin: 'managed_admin_role' }
 const desiredKinds = role => role === 'exec' ? ['member', 'exec'] : role === 'admin' ? ['member', 'admin'] : ['member']
@@ -80,8 +83,9 @@ async function addMissingRoles(member, email, role) {
     for (const kind of desiredKinds(role)) {
         if (member.roles.cache.has(roleIds[kind])) continue
         await store.markRoleManaged(config.guildId, email, member.id, kind)
-        await member.roles.add(roleIds[kind])
+        member = await member.roles.add(roleIds[kind])
     }
+    await unverifiedRoles.syncMember(member)
 }
 
 async function removeManagedRoles(member, claim, kinds = roleKinds) {
@@ -230,8 +234,10 @@ async function reconcile(guild) {
         }
     }
     // Existing server role assignments are outside this bot's ownership.
+    const unverified = await unverifiedRoles.syncGuild(guild)
+    if (unverified.failed) await alertAdmins(`${unverified.failed} member(s) need Unverified role synchronization. Run /roster reconcile.`)
     if (failed) await alertAdmins(`${failed} roster claim(s) still need role synchronization. Run /roster reconcile.`)
-    return { revoked, failed }
+    return { revoked, failed, unverified }
 }
 
 async function uploadRoster(interaction) {
@@ -267,7 +273,7 @@ async function handleRoster(interaction) {
     }
     if (subcommand === 'reconcile') {
         const result = await withMembershipLock(() => reconcile(interaction.guild))
-        await privateReply(interaction, `Roles revoked: ${result.revoked}. Claims requiring role sync retry: ${result.failed}.`)
+        await privateReply(interaction, `Roles revoked: ${result.revoked}. Claims requiring role sync retry: ${result.failed}. Unverified roles added: ${result.unverified.added}, removed: ${result.unverified.removed}, failed: ${result.unverified.failed}.`)
         return
     }
     if (subcommand === 'repair') {
@@ -295,6 +301,7 @@ async function handleRoster(interaction) {
             })
             await removeManagedRoles(member, claim)
             await store.releaseClaim(config.guildId, email, interaction.user.id)
+            if (member) await unverifiedRoles.syncMember(await interaction.guild.members.fetch({ user: member.id, force: true }))
             await privateReply(interaction, `Claim released for <@${claim.user_id}>. They can verify again while on the active roster.`)
         })
         return
@@ -328,6 +335,7 @@ async function handleRoster(interaction) {
             }
             try {
                 await addMissingRoles(targetMember, email, roster.role)
+                if (oldMember) await unverifiedRoles.syncMember(await interaction.guild.members.fetch({ user: oldMember.id, force: true }))
             } catch (error) {
                 await alertAdmins('An account transfer changed the claim, but the new role could not be confirmed. Use /roster repair after checking permissions.')
                 throw new Error('Claim transferred, but target role assignment could not be confirmed. Use /roster repair.')
@@ -355,7 +363,10 @@ client.once('clientReady', async () => {
             !alertChannel.permissionsFor(botMember)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages])) {
             throw new Error('Bot cannot send to its private administrator alert channel')
         }
+        const unverifiedRole = await unverifiedRoles.initialize(guild)
+        unverifiedReady = true
         const result = await withMembershipLock(() => reconcile(guild))
+        console.log(`[TVM] Unverified role ${unverifiedRole.id}: added ${result.unverified.added}, removed ${result.unverified.removed}, failed ${result.unverified.failed}`)
         if (result.revoked) console.log(`[TVM] Reconciled ${result.revoked} removed claims`)
         setInterval(() => {
             store.sweep().catch(error => console.error('[TVM] Cleanup failed:', error?.message || error))
@@ -369,6 +380,19 @@ client.once('clientReady', async () => {
         process.exit(1)
     }
 })
+
+async function syncUnverifiedMember(member) {
+    if (!unverifiedReady || member.guild.id !== config.guildId) return
+    try {
+        await withMembershipLock(() => unverifiedRoles.syncMember(member))
+    } catch (error) {
+        console.error('[TVM] Member Unverified role sync failed:', error?.message || error)
+        await alertAdmins('Unverified role assignment failed. Check bot permissions and run /roster reconcile.')
+    }
+}
+
+client.on('guildMemberAdd', syncUnverifiedMember)
+client.on('guildMemberUpdate', (_oldMember, member) => syncUnverifiedMember(member))
 
 client.on('interactionCreate', async interaction => {
     if (interaction.guildId !== config.guildId) return
