@@ -43,7 +43,7 @@ function withMembershipLock(work) {
 }
 
 const commands = [
-    new SlashCommandBuilder().setName('verify').setDescription('Verify your TVM membership with your student number'),
+    new SlashCommandBuilder().setName('verify').setDescription('Verify your TVM membership with your roster email'),
     new SlashCommandBuilder().setName('source').setDescription('View the source code for this verification bot'),
     new SlashCommandBuilder().setName('postverify').setDescription('Post the TVM verification button here')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
@@ -55,14 +55,14 @@ const commands = [
         .addSubcommand(s => s.setName('status').setDescription('Show active roster status'))
         .addSubcommand(s => s.setName('audit').setDescription('Show recent roster and transfer actions'))
         .addSubcommand(s => s.setName('replace').setDescription('Replace the entire active roster from a CSV')
-            .addAttachmentOption(o => o.setName('csv').setDescription('CSV with Student ID and Email columns').setRequired(true)))
+            .addAttachmentOption(o => o.setName('csv').setDescription('CSV with an Email column').setRequired(true)))
         .addSubcommand(s => s.setName('reconcile').setDescription('Remove the role from members no longer in the roster'))
         .addSubcommand(s => s.setName('repair').setDescription('Restore the member role for an active roster claim')
-            .addStringOption(o => o.setName('student_id').setDescription('Student number').setRequired(true)))
+            .addStringOption(o => o.setName('email').setDescription('Roster email').setRequired(true)))
         .addSubcommand(s => s.setName('release').setDescription('Remove a member role and unlink its roster claim')
-            .addStringOption(o => o.setName('student_id').setDescription('Student number').setRequired(true)))
+            .addStringOption(o => o.setName('email').setDescription('Roster email').setRequired(true)))
         .addSubcommand(s => s.setName('transfer').setDescription('Transfer a roster claim to another Discord account')
-            .addStringOption(o => o.setName('student_id').setDescription('Student number').setRequired(true))
+            .addStringOption(o => o.setName('email').setDescription('Roster email').setRequired(true))
             .addUserOption(o => o.setName('user').setDescription('New Discord account').setRequired(true)))
 ].map(command => command.toJSON())
 
@@ -71,11 +71,11 @@ const codeRow = () => new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('tvm:open-code').setLabel('Enter email code').setStyle(ButtonStyle.Primary)
 )
 
-function studentModal() {
-    return new ModalBuilder().setCustomId('tvm:student').setTitle('Verify TVM membership')
+function emailModal() {
+    return new ModalBuilder().setCustomId('tvm:email').setTitle('Verify TVM membership')
         .addComponents(new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('student_id').setLabel('Student number')
-                .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(32)
+            new TextInputBuilder().setCustomId('email').setLabel('Email on the TVM member roster')
+                .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(254)
         ))
 }
 
@@ -93,9 +93,9 @@ async function sendVerification(interaction) {
 }
 
 async function sendVerificationLocked(interaction) {
-    const studentId = interaction.fields.getTextInputValue('student_id').trim()
-    if (!/^\d{1,32}$/.test(studentId)) {
-        await privateReply(interaction, 'Enter a valid student number using digits only.')
+    const email = interaction.fields.getTextInputValue('email').trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        await privateReply(interaction, 'Enter a valid email address.')
         return
     }
     const status = await store.status(config.guildId)
@@ -103,17 +103,17 @@ async function sendVerificationLocked(interaction) {
         await privateReply(interaction, 'Verification is temporarily unavailable. Please contact a TVM administrator.')
         return
     }
-    if (!await store.allowRequest(config.guildId, interaction.user.id, studentId)) {
+    if (!await store.allowRequest(config.guildId, interaction.user.id, email)) {
         await privateReply(interaction, 'Please wait before requesting another code.')
         return
     }
-    const row = await store.lookup(config.guildId, studentId)
-    const generic = 'If this student number is eligible, a code has been sent to its roster email. Check your inbox and junk folder, then enter the code below.'
+    const row = await store.lookup(config.guildId, email)
+    const generic = 'If this email is on the TVM roster, a code has been sent. Check your inbox and junk folder, then enter the code below.'
     if (!row) {
         await privateReply(interaction, generic, [codeRow()])
         return
     }
-    if (!await store.reserveSend(config.guildId, interaction.user.id, studentId)) {
+    if (!await store.reserveSend(config.guildId, interaction.user.id, email)) {
         await privateReply(interaction, generic, [codeRow()])
         return
     }
@@ -123,7 +123,7 @@ async function sendVerificationLocked(interaction) {
             fromName: 'TVM Verification', to: row.email, subject: 'Your TVM Discord verification code',
             text: `Your TVM Discord verification code is ${code}. It expires in 15 minutes. If you did not request it, you can ignore this email.`
         })
-        await store.savePending(config.guildId, interaction.user.id, studentId, row.email, code)
+        await store.savePending(config.guildId, interaction.user.id, row.email, code)
         await privateReply(interaction, generic, [codeRow()])
     } catch (error) {
         console.error('[TVM] Verification email failed:', error?.message || error)
@@ -143,7 +143,7 @@ async function checkCode(interaction) {
         const result = await store.verifyAndClaim(config.guildId, interaction.user.id, code)
         if (!result.ok) {
             const message = result.reason === 'claimed'
-                ? 'This roster member is already linked to another account. Ask a TVM administrator for an account transfer.'
+                ? 'This roster email is already linked to another account. Ask a TVM administrator for an account transfer.'
                 : 'The code is invalid or expired. Request a new code if needed.'
             await privateReply(interaction, message)
             return
@@ -159,7 +159,7 @@ async function checkCode(interaction) {
             await privateReply(interaction, 'Your code was accepted, but role assignment could not be confirmed. Please contact a TVM administrator.')
             return
         }
-        await privateReply(interaction, 'Verification complete. You now have the TVM Member role.')
+        await privateReply(interaction, 'Verification complete. You now have the TVM membership role.')
     })
 }
 
@@ -174,7 +174,7 @@ async function reconcile(guild) {
                 throw error
             })
             if (member?.roles.cache.has(config.memberRoleId)) await member.roles.remove(config.memberRoleId)
-            await store.releaseNewClaim(config.guildId, claim.student_id, claim.user_id)
+            await store.releaseRemovedClaim(config.guildId, claim.email, claim.user_id)
             revoked++
         } catch (error) {
             console.error('[TVM] Role revocation failed:', error?.message || error)
@@ -243,12 +243,12 @@ async function handleRoster(interaction) {
         return
     }
     if (subcommand === 'repair') {
-        const studentId = interaction.options.getString('student_id').trim()
-        if (!/^\d{1,32}$/.test(studentId)) throw new Error('Student number must contain digits only')
+        const email = interaction.options.getString('email').trim().toLowerCase()
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter a valid email address')
         await withMembershipLock(async () => {
-            const roster = await store.lookup(config.guildId, studentId)
-            const claim = await store.claimFor(config.guildId, studentId)
-            if (!roster || !claim) throw new Error('No active roster claim exists for that student number')
+            const roster = await store.lookup(config.guildId, email)
+            const claim = await store.claimFor(config.guildId, email)
+            if (!roster || !claim) throw new Error('No active roster claim exists for that email')
             const member = await interaction.guild.members.fetch(claim.user_id)
             await member.roles.add(config.memberRoleId)
             await privateReply(interaction, `Member role confirmed for <@${claim.user_id}>.`)
@@ -256,28 +256,28 @@ async function handleRoster(interaction) {
         return
     }
     if (subcommand === 'release') {
-        const studentId = interaction.options.getString('student_id').trim()
-        if (!/^\d{1,32}$/.test(studentId)) throw new Error('Student number must contain digits only')
+        const email = interaction.options.getString('email').trim().toLowerCase()
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter a valid email address')
         await withMembershipLock(async () => {
-            const claim = await store.claimFor(config.guildId, studentId)
-            if (!claim) throw new Error('No account is linked to that student number')
+            const claim = await store.claimFor(config.guildId, email)
+            if (!claim) throw new Error('No account is linked to that email')
             const member = await interaction.guild.members.fetch(claim.user_id).catch(error => {
                 if (error.code === 10007) return null
                 throw error
             })
             if (member?.roles.cache.has(config.memberRoleId)) await member.roles.remove(config.memberRoleId)
-            await store.releaseClaim(config.guildId, studentId, interaction.user.id)
+            await store.releaseClaim(config.guildId, email, interaction.user.id)
             await privateReply(interaction, `Claim released for <@${claim.user_id}>. They can verify again while on the active roster.`)
         })
         return
     }
     if (subcommand === 'transfer') {
-        const studentId = interaction.options.getString('student_id').trim()
+        const email = interaction.options.getString('email').trim().toLowerCase()
         const target = interaction.options.getUser('user')
-        if (!/^\d{1,32}$/.test(studentId)) throw new Error('Student number must contain digits only')
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter a valid email address')
         await withMembershipLock(async () => {
-            const prior = await store.claimFor(config.guildId, studentId)
-            if (!prior) throw new Error('No account is linked to that student number')
+            const prior = await store.claimFor(config.guildId, email)
+            if (!prior) throw new Error('No account is linked to that email')
             if (prior.user_id === target.id) throw new Error('That account already holds the claim')
             const targetMember = await interaction.guild.members.fetch(target.id)
             const oldMember = await interaction.guild.members.fetch(prior.user_id).catch(error => {
@@ -286,7 +286,7 @@ async function handleRoster(interaction) {
             })
             if (oldMember) await oldMember.roles.remove(config.memberRoleId)
             try {
-                await store.transfer(config.guildId, studentId, target.id, interaction.user.id)
+                await store.transfer(config.guildId, email, target.id, interaction.user.id)
             } catch (error) {
                 if (oldMember) await oldMember.roles.add(config.memberRoleId).catch(() => {})
                 throw error
@@ -313,7 +313,7 @@ client.once('ready', async () => {
         const botMember = await guild.members.fetchMe()
         if (!role || !botMember.permissions.has(PermissionFlagsBits.ManageRoles) ||
             botMember.roles.highest.position <= role.position) {
-            throw new Error('Bot cannot manage the configured TVM Member role; check its permissions and role position')
+            throw new Error('Bot cannot manage the configured membership role; check its permissions and role position')
         }
         const alertChannel = await client.channels.fetch(config.alertChannelId)
         if (!alertChannel?.isTextBased() || alertChannel.guildId !== guild.id ||
@@ -348,11 +348,11 @@ client.on('guildMemberUpdate', (before, after) => {
         }
         if (!authorized) {
             await after.roles.remove(config.memberRoleId)
-            await alertAdmins('A TVM Member role was granted without an active roster claim and has been removed.')
+            await alertAdmins('The membership role was granted without an active roster claim and has been removed.')
         }
     }).catch(async error => {
         console.error('[TVM] Could not remove unclaimed role:', error?.message || error)
-        await alertAdmins('Could not remove a TVM Member role without an active roster claim. Check bot permissions and run /roster reconcile.')
+        await alertAdmins('Could not remove the membership role from an account without an active roster claim. Check bot permissions and run /roster reconcile.')
     })
 })
 
@@ -360,17 +360,17 @@ client.on('interactionCreate', async interaction => {
     if (interaction.guildId !== config.guildId) return
     try {
         if (interaction.isButton()) {
-            if (interaction.customId === 'tvm:verify') return await interaction.showModal(studentModal())
+            if (interaction.customId === 'tvm:verify') return await interaction.showModal(emailModal())
             if (interaction.customId === 'tvm:open-code') return await interaction.showModal(codeModal())
             return
         }
         if (interaction.isModalSubmit()) {
-            if (interaction.customId === 'tvm:student') return await sendVerification(interaction)
+            if (interaction.customId === 'tvm:email') return await sendVerification(interaction)
             if (interaction.customId === 'tvm:code') return await checkCode(interaction)
             return
         }
         if (!interaction.isChatInputCommand()) return
-        if (interaction.commandName === 'verify') return await interaction.showModal(studentModal())
+        if (interaction.commandName === 'verify') return await interaction.showModal(emailModal())
         if (interaction.commandName === 'source') {
             await interaction.reply({ content: 'Source code: https://github.com/TheTexta/tvm-discord-email-verification', flags: MessageFlags.Ephemeral })
             return
@@ -383,7 +383,7 @@ client.on('interactionCreate', async interaction => {
         if (interaction.commandName === 'postverify') {
             await interaction.reply({ content: 'Posting the verification button.', flags: MessageFlags.Ephemeral })
             await interaction.channel.send({
-                content: 'TVM members: click below and enter your student number. We will email a code to the address on the TVM membership roster. Source: https://github.com/TheTexta/tvm-discord-email-verification',
+                content: 'TVM members: click below and enter the email address on the TVM membership roster. We will email a verification code to that address. Source: https://github.com/TheTexta/tvm-discord-email-verification',
                 components: [new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId('tvm:verify').setLabel('Verify TVM membership').setStyle(ButtonStyle.Success)
                 )]

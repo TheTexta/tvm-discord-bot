@@ -15,11 +15,9 @@ try {
     if (Buffer.byteLength(csv, 'utf8') > 2 * 1024 * 1024) throw new Error('CSV exceeds 2 MiB')
     const records = parse(csv, { bom: true, skip_empty_lines: true, trim: true })
     const headers = (records.shift() || []).map(value => value.trim())
-    if (!headers.includes('Student ID') || !headers.includes('Email')) throw new Error('CSV needs Student ID and Email headers')
+    if (!headers.includes('Email')) throw new Error('CSV needs an Email header')
     if (new Set(headers).size !== headers.length) throw new Error('CSV has duplicate headers')
-    const idColumn = headers.indexOf('Student ID')
     const emailColumn = headers.indexOf('Email')
-    const seenIds = new Map()
     const seenEmails = new Map()
     const issues = []
     if (!records.length) issues.push('Roster is empty')
@@ -27,11 +25,7 @@ try {
     for (const [index, record] of records.entries()) {
         const row = index + 2
         if (record.length !== headers.length) issues.push(`Row ${row}: column count differs from header`)
-        const id = String(record[idColumn] || '').trim()
         const email = String(record[emailColumn] || '').trim().toLowerCase()
-        if (!/^\d{1,32}$/.test(id)) issues.push(`Row ${row}: missing or invalid Student ID`)
-        else if (seenIds.has(id)) issues.push(`Rows ${seenIds.get(id)} and ${row}: duplicate Student ID`)
-        else seenIds.set(id, row)
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) issues.push(`Row ${row}: missing or invalid Email`)
         else if (seenEmails.has(email)) issues.push(`Rows ${seenEmails.get(email)} and ${row}: duplicate Email`)
         else seenEmails.set(email, row)

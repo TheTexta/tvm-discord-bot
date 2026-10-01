@@ -1,105 +1,46 @@
-# TVM Discord membership verification plan
-
-## Progress as of 2026-09-30
-
-The pinned upstream source, TVM-only bot runtime, roster import and claims database, Resend SMTP configuration, Coolify deployment files, administrator commands, documentation, and local tests are implemented and pushed to the private GitHub repository. The Discord bot token and application ID were validated against Discord, and the bot has joined the TVM server. Server Members Intent is enabled in limited mode, and the bot role is above the configured `General Member` role. The new `npm run discord:check` command passes, including access to the administrator alert channel. The Resend key authenticates to SMTP, and a smoke-test message from `verify@tvm.dextery.dev` was accepted for Resend's delivery test address. The sender and a generated verification-code secret are stored in the ignored `.env.local` file. Cloudflare is now serving the domain's Resend DKIM and return-path records. The sending-only key cannot list Resend domains, so confirm sending status is `Verified` in the Resend dashboard and test a real inbox. A stopped Dockerfile application is staged in Coolify with a dedicated read-only GitHub deploy key, runtime secrets, and persistent storage at `/usr/app/config`. It has not been deployed or started. The repository remains private, so the `/source` link is not yet accessible to members. Production setup and end-to-end tests also await the final roster eligibility policy. The F26 master CSV in Downloads has 103 rows: 12 lack student numbers, and one student number is duplicated with different emails. TVM selected the Exec - Editor row's email for that duplicate; the treatment of rows without IDs and the full eligibility rule still need confirmation.
-
-A protected 90-entry candidate roster is prepared at `/Users/dexteryoung/.local/share/tvm-discord-email-verification/roster-candidate.csv`, based on including every row with a valid student number and preferring row 15 for the duplicate. It has not been imported. The GitHub repository is private, so publishing the deployed source remains part of the release gate.
+# TVM Discord email verification plan
 
 ## Goal
 
-Self-host a TVM-specific fork of [EmailVerify](https://github.com/lkaesberg/EmailVerify) on Coolify. A member enters a student number in a private Discord interaction. The bot looks up that number in TVM's approved roster, sends a one-time code to the **email recorded in the roster**, and grants only the configured `TVM Member` role after the code is confirmed. TVM membership, not possession of any McGill email address, determines eligibility.
+Run a TVM-specific [EmailVerify](https://github.com/lkaesberg/EmailVerify) fork on Coolify. A member privately enters the **email address on the TVM member roster**. The bot sends a one-time code to that address and grants the configured `General Member` role only after the code is accepted. Student numbers do not participate in lookup, verification, claims, or rate limits. A domain match alone does not establish membership.
 
-The initial sender will use a subdomain the current operator controls, such as `tvm.dextery.dev` **if DNS access to that domain is available**. TVM DNS access is not required for the first release. Resend requires a verified domain for normal sending; its test sender is not a production substitute. A future move to a TVM-owned sender should require only mail configuration and DNS changes, not a new verification flow. [Resend verified domains](https://resend.com/docs/dashboard/domains/introduction)
+The complete source of the running bot is public at [TheTexta/tvm-discord-email-verification](https://github.com/TheTexta/tvm-discord-email-verification), and the bot exposes it with `/source`. Never commit the real roster, credentials, or database. Preserve the upstream AGPL license and attribution.
 
-## Starting point and prerequisites
+## Progress as of 2026-10-01
 
-This repository has no application code yet. The first implementation step is to import or fork EmailVerify at a pinned upstream commit, retain its AGPL license, and record the commit and local changes. Publish the complete corresponding source for the running modified bot, as required by the [upstream license notice](https://github.com/lkaesberg/EmailVerify#license). Do not commit credentials or the real membership roster.
+- The email-only TVM runtime, roster parser, claim database, administrator commands, Resend SMTP integration, Dockerfile, Compose example, and local tests are implemented. The original EmailVerify code remains in the repository but is not the running entry point.
+- Discord credentials work. The bot has joined the TVM server; Server Members Intent, role hierarchy, Manage Roles, and private alert-channel access pass `npm run discord:check`.
+- Cloudflare serves the sending domain's DKIM and return-path records. Resend SMTP accepted a message from `verify@tvm.dextery.dev` to its delivery test address. Confirm the domain's `Verified` status in Resend and test a real controlled inbox before inviting members.
+- A Coolify Dockerfile application is staged with a dedicated read-only GitHub deploy key, runtime secrets, and a persistent mount at `/usr/app/config`. It has not been started or given a roster.
+- The F26 master file has 103 data rows. A protected, email-only candidate with 102 unique addresses is prepared outside Git. It includes the 12 rows without student numbers and excludes row 74's alternate email, following TVM's earlier choice of row 15's email. The candidate has not been imported.
 
-Collect these inputs before production configuration:
+## Membership and verification rules
 
-| Input | Needed for |
-| --- | --- |
-| TVM roster with `Student ID` and `Email` columns | Eligibility and delivery address |
-| Eligibility policy | Which roster rows are active; whether workshop/training fields matter |
-| Discord application token and application ID | Dedicated verification bot |
-| Discord server ID and `TVM Member` role ID | Restrict bot and role assignment to TVM |
-| Coolify project/server access | Deployment and persistent storage |
-| Resend account and DNS access to an operator-controlled domain | Verified sending subdomain and SMTP key |
-| Designated TVM administrators | Roster replacement, account transfers, and incident response |
+1. Import only the email addresses of current TVM members. The CSV requires an `Email` header; other columns are ignored. Trim and lowercase addresses for exact lookup. Reject empty, malformed, duplicate, or oversized replacements before changing the active roster.
+2. `/verify` and the verification button open a private email modal. Respond generically whether an address is listed, so the bot does not reveal roster membership.
+3. Limit requests per Discord account and submitted email and cap server-wide sends. Store short-lived rate-limit keys as HMACs instead of raw submitted addresses.
+4. If the email is active, send a six-digit code to that same address. Bind its HMAC to the Discord account, server, email, and roster version. Expire it after 15 minutes and allow at most five attempts.
+5. Recheck the active roster and account claim before granting the configured role. One roster email can be claimed by one Discord account, and one account can claim one roster email. Only administrators can release or transfer claims.
+6. On roster replacement, invalidate pending codes and revoke the role from accounts whose claimed email is no longer active. Reconcile missed role changes at startup and hourly, and remove manually granted roles without active claims.
 
-Treat the pasted mention of `Member List F26 - Master.csv` as a description of the expected format; the file is not in this repository. Keep the live CSV in protected storage outside Git. Decide who is authorized to provide and update it before importing it.
+## Deployment and rollout
 
-## Implementation steps
+1. Run `npm test`, `npm run roster:check -- /path/to/eligible-emails.csv`, and `npm run discord:check`. Keep the roster CSV outside Git.
+2. Confirm Resend shows `tvm.dextery.dev` as verified, then send `/testmail` to a controlled inbox and check delivery and junk placement. Keep click and open tracking disabled for codes. [Resend domain guide](https://resend.com/docs/add-a-domain)
+3. Deploy the staged Coolify app from the public repository. Keep one replica and no public HTTP route. Persist the SQLite database at `/usr/app/config/tvm.db` and back it up off server. Test restoration before a general rollout. [Coolify persistent storage](https://coolify.io/docs/core/persistent-storage/storage-mounts/overview)
+4. Pilot with administrators and a small set of addresses. Import the protected 102-address roster with `/roster replace` once its membership coverage is approved. Run `/roster status` and `/roster reconcile` until there are no outstanding revocations.
+5. Post the verification button in the unverified channel. Test with a normal Discord account that valid roster email plus code grants `General Member`, while an absent email, wrong code, or already claimed email does not. Test that unverified members cannot access member channels.
+6. Verify restart and redeploy preserve roster and claims. Confirm `/source` opens without a GitHub login. Monitor Coolify logs and the private administrator alert channel.
 
-### 1. Establish the base application
-
-- Pin an EmailVerify revision and inspect its current verification, CSV, persistence, configuration, and role-granting paths before changing them. Preserve upstream notices and license.
-- Add a project README with the upstream commit, build/start instructions, configuration reference, and a link to the published source of the deployed version.
-- Add `.gitignore` and example configuration files that exclude `.env.local`, tokens, database files, backups, and real CSV files. Keep examples synthetic.
-- Run the upstream bot locally with a test Discord application and synthetic roster to establish a working baseline.
-
-**Done when:** A clean checkout can build and start from documented, secret-free configuration.
-
-### 2. Make the roster the sole eligibility source
-
-- Replace the member-facing email entry with a private student-number entry. Look up the destination email from the roster; never let a member override it.
-- Parse CSV by header name using a CSV parser. Preserve student numbers as strings, including leading zeroes. Normalize only according to an explicit policy; do not silently rewrite identifiers.
-- Validate the entire import before activation: required headers and fields, usable email addresses, duplicate student numbers, and conflicting email mappings. Reject an invalid replacement without modifying the active roster.
-- Store an active roster version and make replacement an administrator-only operation. A missing, empty, or unreadable active roster closes verification and alerts administrators.
-- Remove or disable any domain-based or alternate email-list route that could grant `TVM Member` without an active roster match. Do not add a broad `mcgill.ca` or `mail.mcgill.ca` allow rule.
-- On roster replacement, revoke `TVM Member` from users who are no longer eligible, invalidate their pending codes, and record the result for administrator review. Define how a corrected student number or email is handled without silently transferring an existing claim.
-
-**Done when:** An eligible student number sends to exactly the roster address; an absent number, malformed roster, or broad-domain address cannot produce a role grant.
-
-### 3. Complete the verification and account-binding flow
-
-1. Member clicks the verification button in `#verify` and privately submits a student number.
-2. Bot checks the active roster and its sending limits. Responses should not reveal whether a particular student number exists or display the full roster email.
-3. Bot creates a short-lived code tied to the Discord user, server, student number, and roster version, then emails the recorded address.
-4. On code submission, bot enforces expiry and attempt limits, rechecks current roster eligibility and account binding, and consumes the code once.
-5. Bot grants only `TVM Member` and records the claim. If role assignment fails, it reports failure and alerts administrators rather than claiming success.
-
-Keep the upstream expiry, attempt limit, and resend cooldown unless inspection reveals a reason to change them. Add limits per Discord account, per student number, and across the server to prevent enumeration and protect sending capacity. Persist pending state across restarts. Allow one Discord account per roster member; make transfers an administrator-only action with an audit trail. Do not expose student numbers, full emails, or codes in routine Discord messages and logs. Review retention and deletion behavior for roster and verification data.
-
-**Done when:** Wrong, expired, reused, transferred, or revoked claims cannot grant a role, including after a bot restart.
-
-### 4. Configure Resend and Discord
-
-- Verify an operator-controlled sending subdomain in Resend using the DNS records Resend provides. Preserve existing inbox records. Use a sender such as `TVM Verification <verify@tvm.dextery.dev>` only after that subdomain is verified. A mailbox at the sender address is optional for outbound-only sending. [Resend domain guide](https://resend.com/docs/dashboard/domains/introduction)
-- Create a dedicated Resend API key. Configure EmailVerify for `smtp.resend.com`, username `resend`, API key as password, port `465`, and implicit TLS. Supply these through Coolify secrets; do not print them in logs. [Resend SMTP settings](https://resend.com/docs/send-with-smtp)
-- Create a dedicated Discord application; enable the member intent required by the selected upstream revision. Install with bot and application-command scopes and the permissions actually needed. Place the bot role above `TVM Member`. [EmailVerify setup](https://github.com/lkaesberg/EmailVerify#discord-developer-portal-setup)
-- Create a `#verify` channel visible to unverified members. Restrict member channels to `TVM Member`; test with a normal user account because administrator permissions can bypass channel restrictions. Restrict roster operations, manual verification, and account transfers to designated administrators.
-
-**Done when:** A test message reaches a real target inbox, the bot can grant and remove `TVM Member`, and an unverified account cannot access member channels.
-
-### 5. Deploy in Coolify
-
-- Build the pinned fork from this repository. Run one bot replica initially, with automatic restart and outbound access to Discord and Resend SMTP.
-- Supply secrets as Coolify environment variables. Add environment-variable support in the fork if the upstream configuration requires a file. Never place live credentials or the roster in a Compose file or source-controlled config.
-- Persist the application's actual database and active roster paths with a Coolify mount declared in Compose or configured on the application. Confirm the paths against the pinned source before deployment; the pasted proposal's `/usr/app/config/bot.db` is a path to verify, not an assumption. Keep administrative or statistics endpoints private.
-- Back up database and roster data to a location outside the deployment server and test a restore. A persistent mount survives normal container replacement but is not a backup. [Coolify persistent storage](https://coolify.io/docs/core/persistent-storage/storage-mounts/overview)
-
-**Done when:** Restart and redeploy preserve roster, claims, and pending verification; a tested backup restores them.
-
-### 6. Validate, pilot, and hand over
-
-Use a private Discord test server and synthetic roster first. Then test with a small group of real TVM administrators before opening `#verify` to members.
+## Acceptance checks
 
 | Scenario | Expected result |
 | --- | --- |
-| Eligible student number and correct code | `TVM Member` granted once |
-| Unknown number or wrong destination attempt | No code to an arbitrary address; private generic response |
-| Wrong, expired, or reused code | Rejected within attempt limits |
-| Member removed while code is pending | Code rejected; role not granted |
-| Existing member removed by roster replacement | Role revoked and claim reviewed |
-| Same roster member claimed by a second Discord account | Administrator transfer required |
-| Invalid or empty replacement CSV | Existing valid roster remains active; verification closes if no valid roster exists |
-| SMTP outage or Discord permission failure | No false success; administrator notified |
-| Restart, redeploy, and restore | Roster and verification state remain consistent |
-
-Check inbox and junk placement as well as Resend's delivery record. Before rollout, check the account's current sending allowance and budget for tests, resends, and a staged launch; service limits can change. Write a short administrator runbook covering roster replacement and revocation, account transfers, backups/restores, key rotation, sender-domain migration, and how future TVM admins obtain access to Coolify, Resend, Discord, and the source repository.
-
-## Release gate
-
-Open verification to members only after the roster policy and candidate CSV are approved, the complete flow and revocation tests pass, the sender domain is verified, storage and restore are tested, the deployed source link is publicly accessible, and at least two designated administrators can perform the documented handover tasks.
+| Active roster email and correct code | `General Member` granted once |
+| Email absent from roster | No code sent and no role granted; generic private response |
+| Wrong, expired, reused, or stale-version code | Rejected |
+| Second Discord account uses a claimed email | Administrator transfer required |
+| Member email removed from roster | Claim becomes inactive and role is revoked |
+| Invalid or empty roster replacement | Previous active roster remains intact |
+| SMTP or Discord role error | No false success; administrator alerted |
+| Restart, redeploy, and backup restore | Roster and claims remain consistent |

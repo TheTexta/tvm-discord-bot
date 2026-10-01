@@ -5,17 +5,17 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const { parseRoster } = require('../src/tvm/roster')
 
-test('parses headers, quoted fields, and leading zeroes', () => {
-    assert.deepEqual(parseRoster('Student ID,Email,Note\n"00123","A@Example.org","x,y"\n'), [
-        { studentId: '00123', email: 'a@example.org' }
+test('parses emails while ignoring student numbers and other columns', () => {
+    assert.deepEqual(parseRoster('Student ID,Email,Note\n,"A@Example.org","x,y"\n00123,b@example.org,member\n'), [
+        { email: 'a@example.org' }, { email: 'b@example.org' }
     ])
+    assert.deepEqual(parseRoster('Email\nmember@example.org\n'), [{ email: 'member@example.org' }])
 })
 
-test('rejects missing, empty, duplicate, and malformed roster data', () => {
-    assert.throws(() => parseRoster('Student ID,Other\n1,x'), /Email headers/)
-    assert.throws(() => parseRoster('Student ID,Email\n'), /cannot be empty/)
-    assert.throws(() => parseRoster('Student ID,Email\n1,a@example.org\n1,b@example.org'), /Duplicate Student ID/)
-    assert.throws(() => parseRoster('Student ID,Email\n1,a@example.org\n2,A@example.org'), /Duplicate Email/)
-    assert.throws(() => parseRoster('Student ID,Email\n1,invalid'), /Invalid Email/)
-    assert.throws(() => parseRoster('Student ID,Email\n1,a@example.org\n2'), /Invalid roster CSV/)
+test('rejects missing, empty, duplicate, and malformed email rosters', () => {
+    assert.throws(() => parseRoster('Student ID,Other\n1,x'), /Email header/)
+    assert.throws(() => parseRoster('Email\n'), /cannot be empty/)
+    assert.throws(() => parseRoster('Email\na@example.org\nA@example.org'), /Duplicate Email/)
+    assert.throws(() => parseRoster('Email\ninvalid'), /Invalid Email/)
+    assert.throws(() => parseRoster('Email,Note\na@example.org'), /Invalid roster CSV/)
 })

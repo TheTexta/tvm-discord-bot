@@ -6,6 +6,9 @@ const path = require('node:path')
 const sqlite3 = require('sqlite3').verbose()
 const crypto = require('node:crypto')
 
+const normalizeEmail = value => String(value ?? '').trim().toLowerCase()
+const validEmail = email => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+
 class Store {
     constructor(filename, codeSecret) {
         process.umask(0o077)
@@ -15,24 +18,29 @@ class Store {
         this.db = new sqlite3.Database(filename)
         this.codeSecret = codeSecret
         this.queue = Promise.resolve()
+        // New table names make a database from the earlier student-number pilot fail
+        // closed: it has no active email roster or claims until an email list is imported.
         this.ready = this._exec(`
             PRAGMA journal_mode = WAL;
             PRAGMA busy_timeout = 5000;
-            CREATE TABLE IF NOT EXISTS roster (guild_id TEXT NOT NULL, student_id TEXT NOT NULL, email TEXT NOT NULL,
-                PRIMARY KEY (guild_id, student_id), UNIQUE (guild_id, email));
-            CREATE TABLE IF NOT EXISTS roster_meta (guild_id TEXT PRIMARY KEY, version INTEGER NOT NULL, updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS claims (guild_id TEXT NOT NULL, student_id TEXT NOT NULL, user_id TEXT NOT NULL,
-                created_at INTEGER NOT NULL, PRIMARY KEY (guild_id, student_id), UNIQUE (guild_id, user_id));
-            CREATE TABLE IF NOT EXISTS pending (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, student_id TEXT NOT NULL,
-                email TEXT NOT NULL, code_hash TEXT NOT NULL, expires_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
-                PRIMARY KEY (guild_id, user_id));
-            CREATE TABLE IF NOT EXISTS request_events (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, student_id TEXT NOT NULL, at INTEGER NOT NULL);
-            CREATE INDEX IF NOT EXISTS idx_request_events_at ON request_events(at);
-            CREATE TABLE IF NOT EXISTS send_events (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, student_id TEXT NOT NULL, at INTEGER NOT NULL);
-            CREATE INDEX IF NOT EXISTS idx_send_events_at ON send_events(at);
-            CREATE TABLE IF NOT EXISTS admin_audit (guild_id TEXT NOT NULL, actor_id TEXT NOT NULL, action TEXT NOT NULL,
-                detail TEXT NOT NULL, at INTEGER NOT NULL);
-            CREATE INDEX IF NOT EXISTS idx_admin_audit_guild_at ON admin_audit(guild_id, at);
+            CREATE TABLE IF NOT EXISTS email_roster (guild_id TEXT NOT NULL, email TEXT NOT NULL,
+                PRIMARY KEY (guild_id, email));
+            CREATE TABLE IF NOT EXISTS email_roster_meta (guild_id TEXT PRIMARY KEY, version INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS email_claims (guild_id TEXT NOT NULL, email TEXT NOT NULL, user_id TEXT NOT NULL,
+                created_at INTEGER NOT NULL, PRIMARY KEY (guild_id, email), UNIQUE (guild_id, user_id));
+            CREATE TABLE IF NOT EXISTS email_pending (guild_id TEXT NOT NULL, user_id TEXT NOT NULL, email TEXT NOT NULL,
+                roster_version INTEGER NOT NULL, code_hash TEXT NOT NULL, expires_at INTEGER NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (guild_id, user_id));
+            CREATE TABLE IF NOT EXISTS email_request_events (guild_id TEXT NOT NULL, user_id TEXT NOT NULL,
+                email_key TEXT NOT NULL, at INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS idx_email_request_events_at ON email_request_events(at);
+            CREATE TABLE IF NOT EXISTS email_send_events (guild_id TEXT NOT NULL, user_id TEXT NOT NULL,
+                email_key TEXT NOT NULL, at INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS idx_email_send_events_at ON email_send_events(at);
+            CREATE TABLE IF NOT EXISTS email_admin_audit (guild_id TEXT NOT NULL, actor_id TEXT NOT NULL,
+                action TEXT NOT NULL, detail TEXT NOT NULL, at INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS idx_email_admin_audit_guild_at ON email_admin_audit(guild_id, at);
         `)
     }
 
@@ -45,44 +53,51 @@ class Store {
         this.queue = next.catch(() => {})
         return next
     }
-    _hash(userId, guildId, studentId, email, code) {
+    _emailKey(email) {
+        return crypto.createHmac('sha256', this.codeSecret).update(email).digest('hex')
+    }
+    _hash(userId, guildId, email, version, code) {
         return crypto.createHmac('sha256', this.codeSecret)
-            .update(JSON.stringify([userId, guildId, studentId, email, code])).digest('hex')
+            .update(JSON.stringify([userId, guildId, email, version, code])).digest('hex')
     }
 
     status(guildId) {
         return this._locked(async () => {
-            const meta = await this._get('SELECT * FROM roster_meta WHERE guild_id = ?', [guildId])
-            const count = await this._get('SELECT COUNT(*) AS count FROM roster WHERE guild_id = ?', [guildId])
-            const removed = await this._get(`SELECT COUNT(*) AS count FROM claims c LEFT JOIN roster r
-                ON r.guild_id = c.guild_id AND r.student_id = c.student_id
-                WHERE c.guild_id = ? AND r.student_id IS NULL`, [guildId])
+            const meta = await this._get('SELECT * FROM email_roster_meta WHERE guild_id = ?', [guildId])
+            const count = await this._get('SELECT COUNT(*) AS count FROM email_roster WHERE guild_id = ?', [guildId])
+            const removed = await this._get(`SELECT COUNT(*) AS count FROM email_claims c LEFT JOIN email_roster r
+                ON r.guild_id = c.guild_id AND r.email = c.email
+                WHERE c.guild_id = ? AND r.email IS NULL`, [guildId])
             return { meta, count: count.count, unreconciled: removed.count }
         })
     }
-
-    lookup(guildId, studentId) {
-        return this._locked(() => this._get('SELECT email FROM roster WHERE guild_id = ? AND student_id = ?', [guildId, studentId]))
+    lookup(guildId, email) {
+        return this._locked(() => this._get('SELECT email FROM email_roster WHERE guild_id = ? AND email = ?',
+            [guildId, normalizeEmail(email)]))
     }
-
-    async replaceRoster(guildId, rows, adminId) {
+    replaceRoster(guildId, rows, adminId) {
         return this._locked(async () => {
+            if (!Array.isArray(rows) || rows.length === 0) throw new Error('Roster cannot be empty')
+            if (rows.length > 10000) throw new Error('Roster exceeds 10,000 rows')
+            const emails = rows.map(row => normalizeEmail(row?.email))
+            if (emails.some(email => !validEmail(email))) throw new Error('Roster contains an invalid email')
+            if (new Set(emails).size !== emails.length) throw new Error('Roster contains duplicate emails')
             await this._exec('BEGIN IMMEDIATE')
             try {
-                const previous = await this._get('SELECT version FROM roster_meta WHERE guild_id = ?', [guildId])
-                await this._run('DELETE FROM roster WHERE guild_id = ?', [guildId])
-                for (const row of rows) {
-                    await this._run('INSERT INTO roster (guild_id, student_id, email) VALUES (?, ?, ?)', [guildId, row.studentId, row.email])
+                const previous = await this._get('SELECT version FROM email_roster_meta WHERE guild_id = ?', [guildId])
+                await this._run('DELETE FROM email_roster WHERE guild_id = ?', [guildId])
+                for (const email of emails) {
+                    await this._run('INSERT INTO email_roster (guild_id, email) VALUES (?, ?)', [guildId, email])
                 }
-                await this._run('DELETE FROM pending WHERE guild_id = ?', [guildId])
+                await this._run('DELETE FROM email_pending WHERE guild_id = ?', [guildId])
                 const version = (previous?.version || 0) + 1
-                await this._run(`INSERT INTO roster_meta (guild_id, version, updated_at, updated_by) VALUES (?, ?, ?, ?)
+                await this._run(`INSERT INTO email_roster_meta (guild_id, version, updated_at, updated_by) VALUES (?, ?, ?, ?)
                     ON CONFLICT(guild_id) DO UPDATE SET version=excluded.version, updated_at=excluded.updated_at, updated_by=excluded.updated_by`,
                     [guildId, version, Date.now(), adminId])
-                await this._run('INSERT INTO admin_audit VALUES (?, ?, ?, ?, ?)',
-                    [guildId, adminId, 'roster_replace', JSON.stringify({ version, count: rows.length }), Date.now()])
+                await this._run('INSERT INTO email_admin_audit VALUES (?, ?, ?, ?, ?)',
+                    [guildId, adminId, 'roster_replace', JSON.stringify({ version, count: emails.length }), Date.now()])
                 await this._exec('COMMIT')
-                return { version, count: rows.length }
+                return { version, count: emails.length }
             } catch (error) {
                 await this._exec('ROLLBACK').catch(() => {})
                 throw error
@@ -90,84 +105,90 @@ class Store {
         })
     }
 
-    allowRequest(guildId, userId, studentId) {
+    allowRequest(guildId, userId, email) {
         return this._locked(async () => {
+            const emailKey = this._emailKey(normalizeEmail(email))
             const now = Date.now()
-            await this._run('DELETE FROM request_events WHERE at < ?', [now - 3600000])
+            await this._run('DELETE FROM email_request_events WHERE at < ?', [now - 3600000])
             const count = await this._get(`SELECT
                 SUM(CASE WHEN user_id = ? THEN 1 ELSE 0 END) AS user_count,
-                SUM(CASE WHEN student_id = ? THEN 1 ELSE 0 END) AS student_count
-                FROM request_events WHERE guild_id = ?`, [userId, studentId, guildId])
-            if ((count.user_count || 0) >= 5 || (count.student_count || 0) >= 4) return false
-            await this._run('INSERT INTO request_events VALUES (?, ?, ?, ?)', [guildId, userId, studentId, now])
+                SUM(CASE WHEN email_key = ? THEN 1 ELSE 0 END) AS email_count
+                FROM email_request_events WHERE guild_id = ?`, [userId, emailKey, guildId])
+            if ((count.user_count || 0) >= 5 || (count.email_count || 0) >= 4) return false
+            await this._run('INSERT INTO email_request_events VALUES (?, ?, ?, ?)', [guildId, userId, emailKey, now])
             return true
         })
     }
-
-    reserveSend(guildId, userId, studentId) {
+    reserveSend(guildId, userId, email) {
         return this._locked(async () => {
+            const emailKey = this._emailKey(normalizeEmail(email))
             const now = Date.now()
-            await this._run('DELETE FROM send_events WHERE at < ?', [now - 86400000])
+            await this._run('DELETE FROM email_send_events WHERE at < ?', [now - 86400000])
             const counts = await this._get(`SELECT
                 SUM(CASE WHEN user_id = ? AND at > ? THEN 1 ELSE 0 END) AS user_count,
-                SUM(CASE WHEN student_id = ? AND at > ? THEN 1 ELSE 0 END) AS student_count,
+                SUM(CASE WHEN email_key = ? AND at > ? THEN 1 ELSE 0 END) AS email_count,
                 SUM(CASE WHEN at > ? THEN 1 ELSE 0 END) AS day_count,
-                MAX(CASE WHEN user_id = ? OR student_id = ? THEN at ELSE 0 END) AS last_send
-                FROM send_events WHERE guild_id = ?`,
-            [userId, now - 3600000, studentId, now - 3600000, now - 86400000, userId, studentId, guildId])
-            if ((counts.user_count || 0) >= 3 || (counts.student_count || 0) >= 3 ||
+                MAX(CASE WHEN user_id = ? OR email_key = ? THEN at ELSE 0 END) AS last_send
+                FROM email_send_events WHERE guild_id = ?`,
+            [userId, now - 3600000, emailKey, now - 3600000, now - 86400000, userId, emailKey, guildId])
+            if ((counts.user_count || 0) >= 3 || (counts.email_count || 0) >= 3 ||
                 (counts.day_count || 0) >= 80 || now - (counts.last_send || 0) < 60000) return false
-            await this._run('INSERT INTO send_events VALUES (?, ?, ?, ?)', [guildId, userId, studentId, now])
+            await this._run('INSERT INTO email_send_events VALUES (?, ?, ?, ?)', [guildId, userId, emailKey, now])
             return true
         })
     }
-
-    savePending(guildId, userId, studentId, email, code) {
-        return this._locked(() => this._run(`INSERT INTO pending VALUES (?, ?, ?, ?, ?, ?, 0)
-            ON CONFLICT(guild_id, user_id) DO UPDATE SET student_id=excluded.student_id, email=excluded.email,
-            code_hash=excluded.code_hash, expires_at=excluded.expires_at, attempts=0`,
-        [guildId, userId, studentId, email, this._hash(userId, guildId, studentId, email, code), Date.now() + 15 * 60000]))
+    savePending(guildId, userId, email, code) {
+        return this._locked(async () => {
+            email = normalizeEmail(email)
+            const meta = await this._get('SELECT version FROM email_roster_meta WHERE guild_id = ?', [guildId])
+            const roster = await this._get('SELECT 1 FROM email_roster WHERE guild_id = ? AND email = ?', [guildId, email])
+            if (!meta || !roster) throw new Error('Email is absent from the active roster')
+            return this._run(`INSERT INTO email_pending VALUES (?, ?, ?, ?, ?, ?, 0)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET email=excluded.email,
+                roster_version=excluded.roster_version, code_hash=excluded.code_hash,
+                expires_at=excluded.expires_at, attempts=0`,
+            [guildId, userId, email, meta.version, this._hash(userId, guildId, email, meta.version, code),
+                Date.now() + 15 * 60000])
+        })
     }
-
     pendingFor(guildId, userId) {
-        return this._locked(() => this._get('SELECT student_id, email, expires_at FROM pending WHERE guild_id = ? AND user_id = ?', [guildId, userId]))
+        return this._locked(() => this._get('SELECT email, expires_at FROM email_pending WHERE guild_id = ? AND user_id = ?', [guildId, userId]))
     }
-
     verifyAndClaim(guildId, userId, code) {
         return this._locked(async () => {
             await this._exec('BEGIN IMMEDIATE')
             try {
-                const pending = await this._get('SELECT * FROM pending WHERE guild_id = ? AND user_id = ?', [guildId, userId])
+                const pending = await this._get('SELECT * FROM email_pending WHERE guild_id = ? AND user_id = ?', [guildId, userId])
                 if (!pending || pending.expires_at < Date.now() || pending.attempts >= 5) {
                     await this._exec('COMMIT')
                     return { ok: false, reason: 'expired' }
                 }
                 const expected = Buffer.from(pending.code_hash, 'hex')
-                const supplied = Buffer.from(this._hash(userId, guildId, pending.student_id, pending.email, code), 'hex')
+                const supplied = Buffer.from(this._hash(userId, guildId, pending.email, pending.roster_version, code), 'hex')
                 if (!crypto.timingSafeEqual(expected, supplied)) {
-                    await this._run('UPDATE pending SET attempts = attempts + 1 WHERE guild_id = ? AND user_id = ?', [guildId, userId])
+                    await this._run('UPDATE email_pending SET attempts = attempts + 1 WHERE guild_id = ? AND user_id = ?', [guildId, userId])
                     await this._exec('COMMIT')
                     return { ok: false, reason: 'invalid' }
                 }
-                const roster = await this._get('SELECT email FROM roster WHERE guild_id = ? AND student_id = ?', [guildId, pending.student_id])
-                const meta = await this._get('SELECT 1 FROM roster_meta WHERE guild_id = ?', [guildId])
-                if (!meta || !roster || roster.email !== pending.email) {
-                    await this._run('DELETE FROM pending WHERE guild_id = ? AND user_id = ?', [guildId, userId])
+                const roster = await this._get('SELECT 1 FROM email_roster WHERE guild_id = ? AND email = ?', [guildId, pending.email])
+                const meta = await this._get('SELECT version FROM email_roster_meta WHERE guild_id = ?', [guildId])
+                if (!meta || meta.version !== pending.roster_version || !roster) {
+                    await this._run('DELETE FROM email_pending WHERE guild_id = ? AND user_id = ?', [guildId, userId])
                     await this._exec('COMMIT')
                     return { ok: false, reason: 'ineligible' }
                 }
-                const holder = await this._get('SELECT user_id FROM claims WHERE guild_id = ? AND student_id = ?', [guildId, pending.student_id])
-                const own = await this._get('SELECT student_id FROM claims WHERE guild_id = ? AND user_id = ?', [guildId, userId])
-                if ((holder && holder.user_id !== userId) || (own && own.student_id !== pending.student_id)) {
-                    await this._run('DELETE FROM pending WHERE guild_id = ? AND user_id = ?', [guildId, userId])
+                const holder = await this._get('SELECT user_id FROM email_claims WHERE guild_id = ? AND email = ?', [guildId, pending.email])
+                const own = await this._get('SELECT email FROM email_claims WHERE guild_id = ? AND user_id = ?', [guildId, userId])
+                if ((holder && holder.user_id !== userId) || (own && own.email !== pending.email)) {
+                    await this._run('DELETE FROM email_pending WHERE guild_id = ? AND user_id = ?', [guildId, userId])
                     await this._exec('COMMIT')
                     return { ok: false, reason: 'claimed' }
                 }
                 const created = !holder
-                if (created) await this._run('INSERT INTO claims VALUES (?, ?, ?, ?)', [guildId, pending.student_id, userId, Date.now()])
-                await this._run('DELETE FROM pending WHERE guild_id = ? AND user_id = ?', [guildId, userId])
+                if (created) await this._run('INSERT INTO email_claims VALUES (?, ?, ?, ?)', [guildId, pending.email, userId, Date.now()])
+                await this._run('DELETE FROM email_pending WHERE guild_id = ? AND user_id = ?', [guildId, userId])
                 await this._exec('COMMIT')
-                return { ok: true, studentId: pending.student_id, created }
+                return { ok: true, email: pending.email, created }
             } catch (error) {
                 await this._exec('ROLLBACK').catch(() => {})
                 throw error
@@ -175,37 +196,40 @@ class Store {
         })
     }
 
-    releaseNewClaim(guildId, studentId, userId) {
-        return this._locked(() => this._run('DELETE FROM claims WHERE guild_id = ? AND student_id = ? AND user_id = ?', [guildId, studentId, userId]))
+    releaseRemovedClaim(guildId, email, userId) {
+        return this._locked(() => this._run('DELETE FROM email_claims WHERE guild_id = ? AND email = ? AND user_id = ?',
+            [guildId, normalizeEmail(email), userId]))
     }
     removedClaims(guildId) {
-        return this._locked(() => this._all(`SELECT c.student_id, c.user_id FROM claims c LEFT JOIN roster r
-            ON r.guild_id = c.guild_id AND r.student_id = c.student_id
-            WHERE c.guild_id = ? AND r.student_id IS NULL`, [guildId]))
+        return this._locked(() => this._all(`SELECT c.email, c.user_id FROM email_claims c LEFT JOIN email_roster r
+            ON r.guild_id = c.guild_id AND r.email = c.email
+            WHERE c.guild_id = ? AND r.email IS NULL`, [guildId]))
     }
     activeClaimUserIds(guildId) {
-        return this._locked(async () => new Set((await this._all(`SELECT c.user_id FROM claims c INNER JOIN roster r
-            ON r.guild_id = c.guild_id AND r.student_id = c.student_id
+        return this._locked(async () => new Set((await this._all(`SELECT c.user_id FROM email_claims c INNER JOIN email_roster r
+            ON r.guild_id = c.guild_id AND r.email = c.email
             WHERE c.guild_id = ?`, [guildId])).map(row => row.user_id)))
     }
     isAuthorizedUser(guildId, userId) {
-        return this._locked(async () => !!(await this._get(`SELECT 1 FROM claims c INNER JOIN roster r
-            ON r.guild_id = c.guild_id AND r.student_id = c.student_id
+        return this._locked(async () => !!(await this._get(`SELECT 1 FROM email_claims c INNER JOIN email_roster r
+            ON r.guild_id = c.guild_id AND r.email = c.email
             WHERE c.guild_id = ? AND c.user_id = ?`, [guildId, userId])))
     }
-    claimFor(guildId, studentId) {
-        return this._locked(() => this._get('SELECT user_id FROM claims WHERE guild_id = ? AND student_id = ?', [guildId, studentId]))
+    claimFor(guildId, email) {
+        return this._locked(() => this._get('SELECT user_id FROM email_claims WHERE guild_id = ? AND email = ?',
+            [guildId, normalizeEmail(email)]))
     }
-    releaseClaim(guildId, studentId, adminId) {
+    releaseClaim(guildId, email, adminId) {
         return this._locked(async () => {
+            email = normalizeEmail(email)
             await this._exec('BEGIN IMMEDIATE')
             try {
-                const claim = await this._get('SELECT user_id FROM claims WHERE guild_id = ? AND student_id = ?', [guildId, studentId])
-                if (!claim) throw new Error('Student ID has no existing claim')
-                await this._run('DELETE FROM claims WHERE guild_id = ? AND student_id = ?', [guildId, studentId])
-                await this._run('DELETE FROM pending WHERE guild_id = ? AND student_id = ?', [guildId, studentId])
-                await this._run('INSERT INTO admin_audit VALUES (?, ?, ?, ?, ?)',
-                    [guildId, adminId, 'claim_release', JSON.stringify({ studentId, userId: claim.user_id }), Date.now()])
+                const claim = await this._get('SELECT user_id FROM email_claims WHERE guild_id = ? AND email = ?', [guildId, email])
+                if (!claim) throw new Error('Email has no existing claim')
+                await this._run('DELETE FROM email_claims WHERE guild_id = ? AND email = ?', [guildId, email])
+                await this._run('DELETE FROM email_pending WHERE guild_id = ? AND email = ?', [guildId, email])
+                await this._run('INSERT INTO email_admin_audit VALUES (?, ?, ?, ?, ?)',
+                    [guildId, adminId, 'claim_release', JSON.stringify({ emailKey: this._emailKey(email), userId: claim.user_id }), Date.now()])
                 await this._exec('COMMIT')
                 return claim.user_id
             } catch (error) {
@@ -214,20 +238,21 @@ class Store {
             }
         })
     }
-    transfer(guildId, studentId, userId, adminId = 'system') {
+    transfer(guildId, email, userId, adminId = 'system') {
         return this._locked(async () => {
+            email = normalizeEmail(email)
             await this._exec('BEGIN IMMEDIATE')
             try {
-                const roster = await this._get('SELECT 1 FROM roster WHERE guild_id = ? AND student_id = ?', [guildId, studentId])
-                if (!roster) throw new Error('Student ID is absent from the active roster')
-                const prior = await this._get('SELECT user_id FROM claims WHERE guild_id = ? AND student_id = ?', [guildId, studentId])
-                if (!prior) throw new Error('Student ID has no existing claim')
-                const other = await this._get('SELECT 1 FROM claims WHERE guild_id = ? AND user_id = ? AND student_id != ?', [guildId, userId, studentId])
-                if (other) throw new Error('Target Discord account already claims another roster member')
-                await this._run('UPDATE claims SET user_id = ?, created_at = ? WHERE guild_id = ? AND student_id = ?', [userId, Date.now(), guildId, studentId])
-                await this._run('DELETE FROM pending WHERE guild_id = ? AND student_id = ?', [guildId, studentId])
-                await this._run('INSERT INTO admin_audit VALUES (?, ?, ?, ?, ?)',
-                    [guildId, adminId, 'account_transfer', JSON.stringify({ studentId, from: prior.user_id, to: userId }), Date.now()])
+                const roster = await this._get('SELECT 1 FROM email_roster WHERE guild_id = ? AND email = ?', [guildId, email])
+                if (!roster) throw new Error('Email is absent from the active roster')
+                const prior = await this._get('SELECT user_id FROM email_claims WHERE guild_id = ? AND email = ?', [guildId, email])
+                if (!prior) throw new Error('Email has no existing claim')
+                const other = await this._get('SELECT 1 FROM email_claims WHERE guild_id = ? AND user_id = ? AND email != ?', [guildId, userId, email])
+                if (other) throw new Error('Target Discord account already claims another roster email')
+                await this._run('UPDATE email_claims SET user_id = ?, created_at = ? WHERE guild_id = ? AND email = ?', [userId, Date.now(), guildId, email])
+                await this._run('DELETE FROM email_pending WHERE guild_id = ? AND email = ?', [guildId, email])
+                await this._run('INSERT INTO email_admin_audit VALUES (?, ?, ?, ?, ?)',
+                    [guildId, adminId, 'account_transfer', JSON.stringify({ emailKey: this._emailKey(email), from: prior.user_id, to: userId }), Date.now()])
                 await this._exec('COMMIT')
                 return prior.user_id
             } catch (error) {
@@ -237,15 +262,15 @@ class Store {
         })
     }
     audit(guildId) {
-        return this._locked(() => this._all('SELECT actor_id, action, detail, at FROM admin_audit WHERE guild_id = ? ORDER BY at DESC LIMIT 10', [guildId]))
+        return this._locked(() => this._all('SELECT actor_id, action, detail, at FROM email_admin_audit WHERE guild_id = ? ORDER BY at DESC LIMIT 10', [guildId]))
     }
     sweep() {
         return this._locked(async () => {
             const now = Date.now()
-            await this._run('DELETE FROM pending WHERE expires_at < ?', [now])
-            await this._run('DELETE FROM request_events WHERE at < ?', [now - 3600000])
-            await this._run('DELETE FROM send_events WHERE at < ?', [now - 86400000])
-            await this._run('DELETE FROM admin_audit WHERE at < ?', [now - 365 * 86400000])
+            await this._run('DELETE FROM email_pending WHERE expires_at < ?', [now])
+            await this._run('DELETE FROM email_request_events WHERE at < ?', [now - 3600000])
+            await this._run('DELETE FROM email_send_events WHERE at < ?', [now - 86400000])
+            await this._run('DELETE FROM email_admin_audit WHERE at < ?', [now - 365 * 86400000])
         })
     }
     close() { return new Promise((resolve, reject) => this.db.close(error => error ? reject(error) : resolve())) }
