@@ -1,0 +1,127 @@
+{
+  "commands": {
+    "verify": "Verify your TVM membership using the email you signed up with",
+    "source": "Check out the verification bot's source code",
+    "postverify": "Post the TVM verification button in this channel",
+    "testmail": "Send a test verification email through Resend",
+    "upload": "Upload a CSV to update the TVM member list and roles",
+    "roster": "Manage the TVM member list",
+    "status": "Check the current TVM member list",
+    "audit": "View recent member list updates and account transfers",
+    "reconcile": "Sync Discord roles with the current TVM member list",
+    "repair": "Restore roles for an active verified member",
+    "release": "Remove a member's role and unlink their verified email",
+    "transfer": "Move a verified membership to another Discord account",
+    "destinationEmail": "Email address to send the test to",
+    "csv": "CSV with Email and Role columns",
+    "rosterEmail": "Email on the TVM member list",
+    "newAccount": "New Discord account"
+  },
+  "buttons": {
+    "verify": "Verify your TVM membership",
+    "enterCode": "Enter your code"
+  },
+  "modals": {
+    "emailTitle": "Verify your TVM membership",
+    "emailLabel": "Email you signed up to TVM with",
+    "codeTitle": "Enter your verification code",
+    "codeLabel": "6-digit code from your email"
+  },
+  "roles": {
+    "member": "General Member",
+    "exec": "Executives (Producers & Editors)",
+    "admin": "Admin Team",
+    "unverified": "Unverified",
+    "separator": " and "
+  },
+  "verification": {
+    "invalidEmail": "That email doesn't look right. Check it and try again!",
+    "unavailable": "Verification is unavailable right now. Please reach out to the TVM Admin Team for help.",
+    "rateLimited": "You've requested a code recently. Give it a moment before trying again!",
+    "codeSent": "If this email is on the TVM member list, you'll receive a verification code. Check your inbox and junk folder, then enter it below!",
+    "emailFailed": "We couldn't send your verification email. Try again later or reach out to the TVM Admin Team.",
+    "invalidCodeFormat": "Enter the 6-digit code from your verification email.",
+    "alreadyClaimed": "This email is already linked to another Discord account. Reach out to the TVM Admin Team to move your membership to this account.",
+    "invalidCode": "That code is incorrect or has expired. Check it or request a new one!",
+    "roleFailed": "Your code was accepted, but we couldn't confirm your Discord roles. Reach out to the TVM Admin Team to get this sorted.",
+    "complete": "You're verified! Your TVM membership gives you access to {roles}. Welcome in! 🎉",
+    "posting": "Posting the verification button!",
+    "post": "Welcome to the TVM Discord! 🎥\n\nClick the button below to verify using the email you signed up to TVM with. We'll send you a code to enter here!\n\nOnce verified, you'll receive {memberRole} and get access to the member channels. Producers and editors also receive {execRole}, and admins also receive {adminRole}.\n\nCheck your junk folder if the email doesn't show up! If you need help, reach out to the TVM Admin Team.\n\nBot source code: https://github.com/TheTexta/tvm-discord-email-verification",
+    "source": "Check out the bot's source code: https://github.com/TheTexta/tvm-discord-email-verification",
+    "failed": "Something went wrong. Please reach out to the TVM Admin Team so they can check the bot logs and try again."
+  },
+  "email": {
+    "fromName": "TVM Verification",
+    "codeSubject": "Your TVM Discord verification code",
+    "codeBody": "Hey!\n\nYour TVM Discord verification code is {code}.\n\nEnter it in Discord to verify your membership and access the TVM member channels. This code expires in 15 minutes.\n\nIf you didn't request this, you can ignore this email!\n\nTVM",
+    "testSubject": "TVM Discord verification — test email",
+    "testBody": "Hey!\n\nThis is a test email from the TVM Discord verification bot.\n\nIf you're reading this, the test email reached your inbox!"
+  },
+  "admin": {
+    "permissionRequired": "You'll need Administrator permission to use this command.",
+    "uploadComplete": "Uploaded {uploaded} rows! The active member list now has {count} emails (version {version}). Existing roles were kept. Membership links needing a role sync retry: {failed}.",
+    "status": "Active member list: {count} members (version {version}). Removals still needing reconciliation: {unreconciled}.",
+    "noRoster": "There's no active TVM member list yet. Verification is closed.",
+    "auditEntry": "{timestamp} • {action} • by {actor} • {detail}",
+    "noAudit": "No member list updates or account transfers recorded yet.",
+    "reconciled": "Role sync complete! Roles revoked: {revoked}. Membership links needing a role sync retry: {failed}. Unverified roles added: {added}, removed: {removed}, failed: {unverifiedFailed}.",
+    "repaired": "Confirmed {roles} for <@{userId}>.",
+    "released": "Unlinked the verified membership for <@{userId}>. They can verify again if they're on the active member list.",
+    "transferred": "Transferred the verified membership to <@{userId}>!",
+    "testmailSent": "SMTP accepted the test email! Check the recipient's inbox and junk folder to confirm it arrived.",
+    "operationFailed": "Couldn't complete that action: {error}"
+  },
+  "auditActions": {
+    "roster_replace": "Member list replaced",
+    "roster_merge": "Member list merged",
+    "claim_release": "Membership unlinked",
+    "account_transfer": "Membership transferred"
+  },
+  "alerts": {
+    "message": "[TVM Verification] {message}",
+    "emailFailed": "Couldn't send a verification email. Check Resend and the bot logs.",
+    "roleFailed": "A member's code was accepted, but their roles couldn't be assigned. Check the bot's role position and permissions.",
+    "unverifiedSync": "{failed} member(s) still need their Unverified role synced. Run /roster reconcile.",
+    "claimSync": "{failed} verified membership link(s) still need their roles synced. Run /roster reconcile.",
+    "transferFailed": "The membership was transferred, but the new account's role couldn't be confirmed. Check permissions, then use /roster repair.",
+    "startupFailed": "Bot startup or member list reconciliation failed. Check the bot logs.",
+    "unverifiedFailed": "Couldn't assign the Unverified role. Check the bot's permissions, then run /roster reconcile.",
+    "interactionFailed": "Something went wrong during a member's verification. Check the bot logs."
+  },
+  "errors": {
+    "csvSize": "The CSV must be 2 MiB or smaller",
+    "csvDownload": "Couldn't download the attached CSV",
+    "invalidEmail": "Enter a valid email address",
+    "noActiveClaim": "That email doesn't have an active verified membership link",
+    "noLinkedAccount": "That email isn't linked to a Discord account",
+    "sameAccount": "That account is already linked to this membership",
+    "transferRoleFailed": "Membership transferred, but the new account's roles couldn't be confirmed. Use /roster repair.",
+    "invalidDestination": "Enter a valid recipient email address",
+    "rosterSize": "The member list exceeds the 2 MiB limit",
+    "duplicateHeaders": "The CSV has duplicate column headers",
+    "missingHeaders": "The CSV needs Email and Role column headers",
+    "invalidCsv": "Couldn't read the member list CSV: {error}",
+    "emptyRoster": "The member list can't be empty",
+    "rosterRows": "The member list exceeds the 10,000-row limit",
+    "invalidEmailRow": "The email on row {row} isn't valid",
+    "duplicateEmailRow": "The email on row {row} appears more than once",
+    "invalidRoleRow": "The role on row {row} isn't valid",
+    "rosterInvalidEmail": "The member list contains an invalid email",
+    "rosterDuplicateEmails": "The member list contains duplicate emails",
+    "rosterInvalidRole": "The member list contains an invalid role",
+    "emailAbsent": "That email isn't on the active TVM member list",
+    "invalidRoleKind": "That role type isn't valid",
+    "noClaim": "That email doesn't have a verified membership link",
+    "targetClaimed": "The new Discord account is already linked to another member email",
+    "manageRoles": "The bot needs Manage Roles permission to configure Unverified",
+    "missingUnverified": "The configured Unverified role couldn't be found",
+    "ambiguousUnverified": "There are multiple Unverified roles. Set TVM_UNVERIFIED_ROLE_ID to choose the correct one.",
+    "unsafeUnverified": "Unverified must be a separate role with no permissions, positioned below the bot's role"
+  },
+  "roleReasons": {
+    "create": "Identify members with no roles who need to verify their TVM membership",
+    "mentionable": "Allow verification reminders to mention the Unverified role",
+    "remove": "Member now has another role",
+    "add": "Member has no roles and needs to verify their TVM membership"
+  }
+}

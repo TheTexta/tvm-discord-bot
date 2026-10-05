@@ -8,6 +8,7 @@ const {
     ButtonStyle, MessageFlags
 } = require('discord.js')
 const { loadConfig } = require('./config')
+const { uiText } = require('./uiText')
 const { parseRoster } = require('./roster')
 const Store = require('./Store')
 const UnverifiedRoleManager = require('./UnverifiedRoleManager')
@@ -31,7 +32,7 @@ async function alertAdmins(message) {
     lastAlertAt.set(message, now)
     try {
         const channel = await client.channels.fetch(config.alertChannelId)
-        if (channel?.isTextBased()) await channel.send({ content: `[TVM verification] ${message}` })
+        if (channel?.isTextBased()) await channel.send({ content: uiText('alerts.message', { message }) })
     } catch (error) {
         console.error('[TVM] Could not send administrator alert:', error?.message || error)
     }
@@ -44,28 +45,28 @@ function withMembershipLock(work) {
 }
 
 const commands = [
-    new SlashCommandBuilder().setName('verify').setDescription('Verify your TVM membership with your roster email'),
-    new SlashCommandBuilder().setName('source').setDescription('View the source code for this verification bot'),
-    new SlashCommandBuilder().setName('postverify').setDescription('Post the TVM verification button here')
+    new SlashCommandBuilder().setName('verify').setDescription(uiText('commands.verify')),
+    new SlashCommandBuilder().setName('source').setDescription(uiText('commands.source')),
+    new SlashCommandBuilder().setName('postverify').setDescription(uiText('commands.postverify'))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-    new SlashCommandBuilder().setName('testmail').setDescription('Send a test email through Resend')
+    new SlashCommandBuilder().setName('testmail').setDescription(uiText('commands.testmail'))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addStringOption(o => o.setName('email').setDescription('Destination email').setRequired(true)),
-    new SlashCommandBuilder().setName('upload').setDescription('Upload a CSV to update the TVM roster and roles')
+        .addStringOption(o => o.setName('email').setDescription(uiText('commands.destinationEmail')).setRequired(true)),
+    new SlashCommandBuilder().setName('upload').setDescription(uiText('commands.upload'))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addAttachmentOption(o => o.setName('csv').setDescription('CSV with Email and Role columns').setRequired(true)),
-    new SlashCommandBuilder().setName('roster').setDescription('Manage the TVM membership roster')
+        .addAttachmentOption(o => o.setName('csv').setDescription(uiText('commands.csv')).setRequired(true)),
+    new SlashCommandBuilder().setName('roster').setDescription(uiText('commands.roster'))
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addSubcommand(s => s.setName('status').setDescription('Show active roster status'))
-        .addSubcommand(s => s.setName('audit').setDescription('Show recent roster and transfer actions'))
-        .addSubcommand(s => s.setName('reconcile').setDescription('Sync roles for verified roster members'))
-        .addSubcommand(s => s.setName('repair').setDescription('Restore the member role for an active roster claim')
-            .addStringOption(o => o.setName('email').setDescription('Roster email').setRequired(true)))
-        .addSubcommand(s => s.setName('release').setDescription('Remove a member role and unlink its roster claim')
-            .addStringOption(o => o.setName('email').setDescription('Roster email').setRequired(true)))
-        .addSubcommand(s => s.setName('transfer').setDescription('Transfer a roster claim to another Discord account')
-            .addStringOption(o => o.setName('email').setDescription('Roster email').setRequired(true))
-            .addUserOption(o => o.setName('user').setDescription('New Discord account').setRequired(true)))
+        .addSubcommand(s => s.setName('status').setDescription(uiText('commands.status')))
+        .addSubcommand(s => s.setName('audit').setDescription(uiText('commands.audit')))
+        .addSubcommand(s => s.setName('reconcile').setDescription(uiText('commands.reconcile')))
+        .addSubcommand(s => s.setName('repair').setDescription(uiText('commands.repair'))
+            .addStringOption(o => o.setName('email').setDescription(uiText('commands.rosterEmail')).setRequired(true)))
+        .addSubcommand(s => s.setName('release').setDescription(uiText('commands.release'))
+            .addStringOption(o => o.setName('email').setDescription(uiText('commands.rosterEmail')).setRequired(true)))
+        .addSubcommand(s => s.setName('transfer').setDescription(uiText('commands.transfer'))
+            .addStringOption(o => o.setName('email').setDescription(uiText('commands.rosterEmail')).setRequired(true))
+            .addUserOption(o => o.setName('user').setDescription(uiText('commands.newAccount')).setRequired(true)))
 ].map(command => command.toJSON())
 
 const privateReply = (interaction, content, components = []) => interaction.editReply({ content, components })
@@ -73,11 +74,11 @@ const roleKinds = ['member', 'exec', 'admin']
 const roleIds = { member: config.memberRoleId, exec: config.execRoleId, admin: config.adminRoleId }
 const unverifiedRoles = new UnverifiedRoleManager(config.guildId, config.unverifiedRoleId, Object.values(roleIds))
 let unverifiedReady = false
-const roleNames = { member: 'General Member', exec: 'Executives (Producers & Editors)', admin: 'Admin Team' }
+const roleNames = { member: uiText('roles.member'), exec: uiText('roles.exec'), admin: uiText('roles.admin') }
 const managedColumns = { member: 'managed_role', exec: 'managed_exec_role', admin: 'managed_admin_role' }
 const desiredKinds = role => role === 'exec' ? ['member', 'exec'] : role === 'admin' ? ['member', 'admin'] : ['member']
 const existingRoles = member => Object.fromEntries(roleKinds.map(kind => [kind, member.roles.cache.has(roleIds[kind])]))
-const roleSummary = role => desiredKinds(role).map(kind => roleNames[kind]).join(' and ')
+const roleSummary = role => desiredKinds(role).map(kind => roleNames[kind]).join(uiText('roles.separator'))
 
 async function addMissingRoles(member, email, role) {
     for (const kind of desiredKinds(role)) {
@@ -101,21 +102,21 @@ async function removeManagedRoles(member, claim, kinds = roleKinds) {
     return removed
 }
 const codeRow = () => new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('tvm:open-code').setLabel('Enter email code').setStyle(ButtonStyle.Primary)
+    new ButtonBuilder().setCustomId('tvm:open-code').setLabel(uiText('buttons.enterCode')).setStyle(ButtonStyle.Primary)
 )
 
 function emailModal() {
-    return new ModalBuilder().setCustomId('tvm:email').setTitle('Verify TVM membership')
+    return new ModalBuilder().setCustomId('tvm:email').setTitle(uiText('modals.emailTitle'))
         .addComponents(new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('email').setLabel('Email on the TVM member roster')
+            new TextInputBuilder().setCustomId('email').setLabel(uiText('modals.emailLabel'))
                 .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(254)
         ))
 }
 
 function codeModal() {
-    return new ModalBuilder().setCustomId('tvm:code').setTitle('Enter verification code')
+    return new ModalBuilder().setCustomId('tvm:code').setTitle(uiText('modals.codeTitle'))
         .addComponents(new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId('code').setLabel('Six-digit email code')
+            new TextInputBuilder().setCustomId('code').setLabel(uiText('modals.codeLabel'))
                 .setStyle(TextInputStyle.Short).setRequired(true).setMinLength(6).setMaxLength(6)
         ))
 }
@@ -128,20 +129,20 @@ async function sendVerification(interaction) {
 async function sendVerificationLocked(interaction) {
     const email = interaction.fields.getTextInputValue('email').trim().toLowerCase()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        await privateReply(interaction, 'Enter a valid email address.')
+        await privateReply(interaction, uiText('verification.invalidEmail'))
         return
     }
     const status = await store.status(config.guildId)
     if (!status.meta || status.count === 0) {
-        await privateReply(interaction, 'Verification is temporarily unavailable. Please contact a TVM administrator.')
+        await privateReply(interaction, uiText('verification.unavailable'))
         return
     }
     if (!await store.allowRequest(config.guildId, interaction.user.id, email)) {
-        await privateReply(interaction, 'Please wait before requesting another code.')
+        await privateReply(interaction, uiText('verification.rateLimited'))
         return
     }
     const row = await store.lookup(config.guildId, email)
-    const generic = 'If this email is on the TVM roster, a code has been sent. Check your inbox and junk folder, then enter the code below.'
+    const generic = uiText('verification.codeSent')
     if (!row) {
         await privateReply(interaction, generic, [codeRow()])
         return
@@ -153,15 +154,15 @@ async function sendVerificationLocked(interaction) {
     const code = crypto.randomInt(100000, 1000000).toString()
     try {
         await mail.sendMail({
-            fromName: 'TVM Verification', to: row.email, subject: 'Your TVM Discord verification code',
-            text: `Your TVM Discord verification code is ${code}. It expires in 15 minutes. If you did not request it, you can ignore this email.`
+            fromName: uiText('email.fromName'), to: row.email, subject: uiText('email.codeSubject'),
+            text: uiText('email.codeBody', { code })
         })
         await store.savePending(config.guildId, interaction.user.id, row.email, code)
         await privateReply(interaction, generic, [codeRow()])
     } catch (error) {
         console.error('[TVM] Verification email failed:', error?.message || error)
-        await alertAdmins('Verification email delivery failed. Check Resend and the bot logs.')
-        await privateReply(interaction, 'Verification email could not be sent. Please try later or contact a TVM administrator.')
+        await alertAdmins(uiText('alerts.emailFailed'))
+        await privateReply(interaction, uiText('verification.emailFailed'))
     }
 }
 
@@ -169,7 +170,7 @@ async function checkCode(interaction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral })
     const code = interaction.fields.getTextInputValue('code').trim()
     if (!/^\d{6}$/.test(code)) {
-        await privateReply(interaction, 'Enter the six-digit code from your email.')
+        await privateReply(interaction, uiText('verification.invalidCodeFormat'))
         return
     }
     await withMembershipLock(async () => {
@@ -177,8 +178,8 @@ async function checkCode(interaction) {
         const result = await store.verifyAndClaim(config.guildId, interaction.user.id, code, existingRoles(member))
         if (!result.ok) {
             const message = result.reason === 'claimed'
-                ? 'This roster email is already linked to another account. Ask a TVM administrator for an account transfer.'
-                : 'The code is invalid or expired. Request a new code if needed.'
+                ? uiText('verification.alreadyClaimed')
+                : uiText('verification.invalidCode')
             await privateReply(interaction, message)
             return
         }
@@ -188,11 +189,11 @@ async function checkCode(interaction) {
             // Discord may apply a role and lose the response. Keep the claim so an
             // ambiguous API failure can never leave an untracked member role.
             console.error('[TVM] Role assignment failed:', error?.message || error)
-            await alertAdmins('A verification code was accepted, but role assignment failed. Check bot role hierarchy and permissions.')
-            await privateReply(interaction, 'Your code was accepted, but role assignment could not be confirmed. Please contact a TVM administrator.')
+            await alertAdmins(uiText('alerts.roleFailed'))
+            await privateReply(interaction, uiText('verification.roleFailed'))
             return
         }
-        await privateReply(interaction, `Verification complete. Your roster email qualifies you for ${roleSummary(result.role)}.`)
+        await privateReply(interaction, uiText('verification.complete', { roles: roleSummary(result.role) }))
     })
 }
 
@@ -235,23 +236,23 @@ async function reconcile(guild) {
     }
     // Existing server role assignments are outside this bot's ownership.
     const unverified = await unverifiedRoles.syncGuild(guild)
-    if (unverified.failed) await alertAdmins(`${unverified.failed} member(s) need Unverified role synchronization. Run /roster reconcile.`)
-    if (failed) await alertAdmins(`${failed} roster claim(s) still need role synchronization. Run /roster reconcile.`)
+    if (unverified.failed) await alertAdmins(uiText('alerts.unverifiedSync', { failed: unverified.failed }))
+    if (failed) await alertAdmins(uiText('alerts.claimSync', { failed }))
     return { revoked, failed, unverified }
 }
 
 async function uploadRoster(interaction) {
     const attachment = interaction.options.getAttachment('csv')
-    if (!attachment || attachment.size > 2 * 1024 * 1024) throw new Error('CSV must be 2 MiB or smaller')
+    if (!attachment || attachment.size > 2 * 1024 * 1024) throw new Error(uiText('errors.csvSize'))
     const response = await fetch(attachment.url, { signal: AbortSignal.timeout(15000) })
-    if (!response.ok) throw new Error('Could not download the CSV attachment')
+    if (!response.ok) throw new Error(uiText('errors.csvDownload'))
     const rows = parseRoster(await response.text())
     const outcome = await withMembershipLock(async () => {
         const imported = await store.mergeRoster(config.guildId, rows, interaction.user.id)
         const reconciliation = await reconcile(interaction.guild)
         return { ...imported, ...reconciliation }
     })
-    await privateReply(interaction, `Uploaded ${outcome.uploaded} rows. Active roster: ${outcome.count} emails, version ${outcome.version}. Existing roles were preserved. Claims requiring role sync retry: ${outcome.failed}.`)
+    await privateReply(interaction, uiText('admin.uploadComplete', outcome))
 }
 
 async function handleRoster(interaction) {
@@ -260,41 +261,49 @@ async function handleRoster(interaction) {
     if (subcommand === 'status') {
         const status = await store.status(config.guildId)
         await privateReply(interaction, status.meta
-            ? `Active roster: ${status.count} members, version ${status.meta.version}. Unreconciled removals: ${status.unreconciled}.`
-            : 'No active roster. Verification is closed.')
+            ? uiText('admin.status', { count: status.count, version: status.meta.version, unreconciled: status.unreconciled })
+            : uiText('admin.noRoster'))
         return
     }
     if (subcommand === 'audit') {
         const entries = await store.audit(config.guildId)
         await privateReply(interaction, entries.length ? entries.map(entry =>
-            `${new Date(entry.at).toISOString()} • ${entry.action} • by ${/^\d{17,20}$/.test(entry.actor_id) ? `<@${entry.actor_id}>` : entry.actor_id} • ${entry.detail}`
-        ).join('\n').slice(0, 1900) : 'No roster or transfer actions recorded.')
+            uiText('admin.auditEntry', {
+                timestamp: new Date(entry.at).toISOString(),
+                action: uiText(`auditActions.${entry.action}`),
+                actor: /^\d{17,20}$/.test(entry.actor_id) ? `<@${entry.actor_id}>` : entry.actor_id,
+                detail: entry.detail
+            })
+        ).join('\n').slice(0, 1900) : uiText('admin.noAudit'))
         return
     }
     if (subcommand === 'reconcile') {
         const result = await withMembershipLock(() => reconcile(interaction.guild))
-        await privateReply(interaction, `Roles revoked: ${result.revoked}. Claims requiring role sync retry: ${result.failed}. Unverified roles added: ${result.unverified.added}, removed: ${result.unverified.removed}, failed: ${result.unverified.failed}.`)
+        await privateReply(interaction, uiText('admin.reconciled', {
+            revoked: result.revoked, failed: result.failed, added: result.unverified.added,
+            removed: result.unverified.removed, unverifiedFailed: result.unverified.failed
+        }))
         return
     }
     if (subcommand === 'repair') {
         const email = interaction.options.getString('email').trim().toLowerCase()
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter a valid email address')
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error(uiText('errors.invalidEmail'))
         await withMembershipLock(async () => {
             const roster = await store.lookup(config.guildId, email)
             const claim = await store.claimFor(config.guildId, email)
-            if (!roster || !claim) throw new Error('No active roster claim exists for that email')
+            if (!roster || !claim) throw new Error(uiText('errors.noActiveClaim'))
             const member = await interaction.guild.members.fetch(claim.user_id)
             await addMissingRoles(member, email, roster.role)
-            await privateReply(interaction, `${roleSummary(roster.role)} confirmed for <@${claim.user_id}>.`)
+            await privateReply(interaction, uiText('admin.repaired', { roles: roleSummary(roster.role), userId: claim.user_id }))
         })
         return
     }
     if (subcommand === 'release') {
         const email = interaction.options.getString('email').trim().toLowerCase()
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter a valid email address')
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error(uiText('errors.invalidEmail'))
         await withMembershipLock(async () => {
             const claim = await store.claimFor(config.guildId, email)
-            if (!claim) throw new Error('No account is linked to that email')
+            if (!claim) throw new Error(uiText('errors.noLinkedAccount'))
             const member = await interaction.guild.members.fetch(claim.user_id).catch(error => {
                 if (error.code === 10007) return null
                 throw error
@@ -302,18 +311,18 @@ async function handleRoster(interaction) {
             await removeManagedRoles(member, claim)
             await store.releaseClaim(config.guildId, email, interaction.user.id)
             if (member) await unverifiedRoles.syncMember(await interaction.guild.members.fetch({ user: member.id, force: true }))
-            await privateReply(interaction, `Claim released for <@${claim.user_id}>. They can verify again while on the active roster.`)
+            await privateReply(interaction, uiText('admin.released', { userId: claim.user_id }))
         })
         return
     }
     if (subcommand === 'transfer') {
         const email = interaction.options.getString('email').trim().toLowerCase()
         const target = interaction.options.getUser('user')
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter a valid email address')
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error(uiText('errors.invalidEmail'))
         await withMembershipLock(async () => {
             const prior = await store.claimFor(config.guildId, email)
-            if (!prior) throw new Error('No account is linked to that email')
-            if (prior.user_id === target.id) throw new Error('That account already holds the claim')
+            if (!prior) throw new Error(uiText('errors.noLinkedAccount'))
+            if (prior.user_id === target.id) throw new Error(uiText('errors.sameAccount'))
             const targetMember = await interaction.guild.members.fetch(target.id)
             const oldMember = await interaction.guild.members.fetch(prior.user_id).catch(error => {
                 if (error.code === 10007) return null
@@ -337,10 +346,10 @@ async function handleRoster(interaction) {
                 await addMissingRoles(targetMember, email, roster.role)
                 if (oldMember) await unverifiedRoles.syncMember(await interaction.guild.members.fetch({ user: oldMember.id, force: true }))
             } catch (error) {
-                await alertAdmins('An account transfer changed the claim, but the new role could not be confirmed. Use /roster repair after checking permissions.')
-                throw new Error('Claim transferred, but target role assignment could not be confirmed. Use /roster repair.')
+                await alertAdmins(uiText('alerts.transferFailed'))
+                throw new Error(uiText('errors.transferRoleFailed'))
             }
-            await privateReply(interaction, `Account transfer complete for <@${target.id}>.`)
+            await privateReply(interaction, uiText('admin.transferred', { userId: target.id }))
         })
     }
 }
@@ -375,7 +384,7 @@ client.once('clientReady', async () => {
         }, 3600000).unref()
     } catch (error) {
         console.error('[TVM] Startup failed:', error?.message || error)
-        await alertAdmins('Bot startup or roster reconciliation failed. Check bot logs.')
+        await alertAdmins(uiText('alerts.startupFailed'))
         client.destroy()
         process.exit(1)
     }
@@ -387,7 +396,7 @@ async function syncUnverifiedMember(member) {
         await withMembershipLock(() => unverifiedRoles.syncMember(member))
     } catch (error) {
         console.error('[TVM] Member Unverified role sync failed:', error?.message || error)
-        await alertAdmins('Unverified role assignment failed. Check bot permissions and run /roster reconcile.')
+        await alertAdmins(uiText('alerts.unverifiedFailed'))
     }
 }
 
@@ -410,11 +419,11 @@ client.on('interactionCreate', async interaction => {
         if (!interaction.isChatInputCommand()) return
         if (interaction.commandName === 'verify') return await interaction.showModal(emailModal())
         if (interaction.commandName === 'source') {
-            await interaction.reply({ content: 'Source code: https://github.com/TheTexta/tvm-discord-email-verification', flags: MessageFlags.Ephemeral })
+            await interaction.reply({ content: uiText('verification.source'), flags: MessageFlags.Ephemeral })
             return
         }
         if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
-            await interaction.reply({ content: 'Administrator permission required.', flags: MessageFlags.Ephemeral })
+            await interaction.reply({ content: uiText('admin.permissionRequired'), flags: MessageFlags.Ephemeral })
             return
         }
         if (interaction.commandName === 'upload') {
@@ -423,11 +432,11 @@ client.on('interactionCreate', async interaction => {
         }
         if (interaction.commandName === 'roster') return await handleRoster(interaction)
         if (interaction.commandName === 'postverify') {
-            await interaction.reply({ content: 'Posting the verification button.', flags: MessageFlags.Ephemeral })
+            await interaction.reply({ content: uiText('verification.posting'), flags: MessageFlags.Ephemeral })
             await interaction.channel.send({
-                content: 'TVM members: verify the email address on the TVM roster. Everyone receives General Member. Editors and producers also receive Executives (Producers & Editors); admins also receive Admin Team. We will email a verification code to your roster address. Source: https://github.com/TheTexta/tvm-discord-email-verification',
+                content: uiText('verification.post', { memberRole: roleNames.member, execRole: roleNames.exec, adminRole: roleNames.admin }),
                 components: [new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('tvm:verify').setLabel('Verify TVM membership').setStyle(ButtonStyle.Success)
+                    new ButtonBuilder().setCustomId('tvm:verify').setLabel(uiText('buttons.verify')).setStyle(ButtonStyle.Success)
                 )]
             })
             return
@@ -435,18 +444,18 @@ client.on('interactionCreate', async interaction => {
         if (interaction.commandName === 'testmail') {
             await interaction.deferReply({ flags: MessageFlags.Ephemeral })
             const email = interaction.options.getString('email').trim()
-            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Invalid destination email')
-            await mail.sendMail({ fromName: 'TVM Verification', to: email,
-                subject: 'TVM verification mail test', text: 'This is a test of the TVM Discord verification email sender.' })
-            await privateReply(interaction, 'Test message accepted by SMTP. Check the destination inbox and junk folder.')
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error(uiText('errors.invalidDestination'))
+            await mail.sendMail({ fromName: uiText('email.fromName'), to: email,
+                subject: uiText('email.testSubject'), text: uiText('email.testBody') })
+            await privateReply(interaction, uiText('admin.testmailSent'))
         }
     } catch (error) {
         console.error('[TVM] Interaction failed:', error?.message || error)
         const adminOperation = interaction.isChatInputCommand() && interaction.commandName !== 'verify' && interaction.commandName !== 'source'
-        if (!adminOperation) await alertAdmins('A member verification interaction failed. Check the bot logs.')
+        if (!adminOperation) await alertAdmins(uiText('alerts.interactionFailed'))
         const message = adminOperation
-            ? `Operation failed: ${String(error?.message || error).slice(0, 1500)}`
-            : 'The operation failed. A TVM administrator should check the bot logs and try again.'
+            ? uiText('admin.operationFailed', { error: String(error?.message || error).slice(0, 1500) })
+            : uiText('verification.failed')
         if (interaction.deferred || interaction.replied) await interaction.editReply({ content: message, components: [] }).catch(() => {})
         else await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {})
     }

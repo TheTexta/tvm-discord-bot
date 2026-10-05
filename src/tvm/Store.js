@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 'use strict'
 
+const { uiText } = require('./uiText')
+
 const fs = require('node:fs')
 const path = require('node:path')
 const sqlite3 = require('sqlite3').verbose()
@@ -90,12 +92,12 @@ class Store {
     }
     replaceRoster(guildId, rows, adminId) {
         return this._locked(async () => {
-            if (!Array.isArray(rows) || rows.length === 0) throw new Error('Roster cannot be empty')
-            if (rows.length > 10000) throw new Error('Roster exceeds 10,000 rows')
+            if (!Array.isArray(rows) || rows.length === 0) throw new Error(uiText('errors.emptyRoster'))
+            if (rows.length > 10000) throw new Error(uiText('errors.rosterRows'))
             const emails = rows.map(row => normalizeEmail(row?.email))
-            if (emails.some(email => !validEmail(email))) throw new Error('Roster contains an invalid email')
-            if (new Set(emails).size !== emails.length) throw new Error('Roster contains duplicate emails')
-            if (rows.some(row => !['gm', 'exec', 'admin'].includes(row?.role))) throw new Error('Roster contains an invalid role')
+            if (emails.some(email => !validEmail(email))) throw new Error(uiText('errors.rosterInvalidEmail'))
+            if (new Set(emails).size !== emails.length) throw new Error(uiText('errors.rosterDuplicateEmails'))
+            if (rows.some(row => !['gm', 'exec', 'admin'].includes(row?.role))) throw new Error(uiText('errors.rosterInvalidRole'))
             await this._exec('BEGIN IMMEDIATE')
             try {
                 const previous = await this._get('SELECT version FROM email_roster_meta WHERE guild_id = ?', [guildId])
@@ -121,12 +123,12 @@ class Store {
 
     mergeRoster(guildId, rows, adminId) {
         return this._locked(async () => {
-            if (!Array.isArray(rows) || rows.length === 0) throw new Error('Roster cannot be empty')
-            if (rows.length > 10000) throw new Error('Roster exceeds 10,000 rows')
+            if (!Array.isArray(rows) || rows.length === 0) throw new Error(uiText('errors.emptyRoster'))
+            if (rows.length > 10000) throw new Error(uiText('errors.rosterRows'))
             const emails = rows.map(row => normalizeEmail(row?.email))
-            if (emails.some(email => !validEmail(email))) throw new Error('Roster contains an invalid email')
-            if (new Set(emails).size !== emails.length) throw new Error('Roster contains duplicate emails')
-            if (rows.some(row => !['gm', 'exec', 'admin'].includes(row?.role))) throw new Error('Roster contains an invalid role')
+            if (emails.some(email => !validEmail(email))) throw new Error(uiText('errors.rosterInvalidEmail'))
+            if (new Set(emails).size !== emails.length) throw new Error(uiText('errors.rosterDuplicateEmails'))
+            if (rows.some(row => !['gm', 'exec', 'admin'].includes(row?.role))) throw new Error(uiText('errors.rosterInvalidRole'))
             await this._exec('BEGIN IMMEDIATE')
             try {
                 const previous = await this._get('SELECT version FROM email_roster_meta WHERE guild_id = ?', [guildId])
@@ -188,7 +190,7 @@ class Store {
             email = normalizeEmail(email)
             const meta = await this._get('SELECT version FROM email_roster_meta WHERE guild_id = ?', [guildId])
             const roster = await this._get('SELECT 1 FROM email_roster WHERE guild_id = ? AND email = ?', [guildId, email])
-            if (!meta || !roster) throw new Error('Email is absent from the active roster')
+            if (!meta || !roster) throw new Error(uiText('errors.emailAbsent'))
             return this._run(`INSERT INTO email_pending VALUES (?, ?, ?, ?, ?, ?, 0)
                 ON CONFLICT(guild_id, user_id) DO UPDATE SET email=excluded.email,
                 roster_version=excluded.roster_version, code_hash=excluded.code_hash,
@@ -287,13 +289,13 @@ class Store {
     }
     markRoleManaged(guildId, email, userId, kind = 'member') {
         const column = { member: 'managed_role', exec: 'managed_exec_role', admin: 'managed_admin_role' }[kind]
-        if (!column) throw new Error('Invalid role kind')
+        if (!column) throw new Error(uiText('errors.invalidRoleKind'))
         return this._locked(() => this._run(`UPDATE email_claims SET ${column} = 1
             WHERE guild_id = ? AND email = ? AND user_id = ?`, [guildId, normalizeEmail(email), userId]))
     }
     clearRoleManaged(guildId, email, userId, kind) {
         const column = { member: 'managed_role', exec: 'managed_exec_role', admin: 'managed_admin_role' }[kind]
-        if (!column) throw new Error('Invalid role kind')
+        if (!column) throw new Error(uiText('errors.invalidRoleKind'))
         return this._locked(() => this._run(`UPDATE email_claims SET ${column} = 0
             WHERE guild_id = ? AND email = ? AND user_id = ?`, [guildId, normalizeEmail(email), userId]))
     }
@@ -303,7 +305,7 @@ class Store {
             await this._exec('BEGIN IMMEDIATE')
             try {
                 const claim = await this._get('SELECT user_id FROM email_claims WHERE guild_id = ? AND email = ?', [guildId, email])
-                if (!claim) throw new Error('Email has no existing claim')
+                if (!claim) throw new Error(uiText('errors.noClaim'))
                 await this._run('DELETE FROM email_claims WHERE guild_id = ? AND email = ?', [guildId, email])
                 await this._run('DELETE FROM email_pending WHERE guild_id = ? AND email = ?', [guildId, email])
                 await this._run('INSERT INTO email_admin_audit VALUES (?, ?, ?, ?, ?)',
@@ -322,11 +324,11 @@ class Store {
             await this._exec('BEGIN IMMEDIATE')
             try {
                 const roster = await this._get('SELECT role FROM email_roster WHERE guild_id = ? AND email = ?', [guildId, email])
-                if (!roster) throw new Error('Email is absent from the active roster')
+                if (!roster) throw new Error(uiText('errors.emailAbsent'))
                 const prior = await this._get('SELECT user_id FROM email_claims WHERE guild_id = ? AND email = ?', [guildId, email])
-                if (!prior) throw new Error('Email has no existing claim')
+                if (!prior) throw new Error(uiText('errors.noClaim'))
                 const other = await this._get('SELECT 1 FROM email_claims WHERE guild_id = ? AND user_id = ? AND email != ?', [guildId, userId, email])
-                if (other) throw new Error('Target Discord account already claims another roster email')
+                if (other) throw new Error(uiText('errors.targetClaimed'))
                 await this._run(`UPDATE email_claims SET user_id = ?, created_at = ?, managed_role = ?,
                     managed_exec_role = ?, managed_admin_role = ? WHERE guild_id = ? AND email = ?`,
                     [userId, Date.now(), existingRoles.member ? 0 : 1,

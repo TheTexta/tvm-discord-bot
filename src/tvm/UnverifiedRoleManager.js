@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 'use strict'
 
+const { uiText } = require('./uiText')
+
 const { PermissionFlagsBits } = require('discord.js')
 
 class UnverifiedRoleManager {
@@ -14,25 +16,25 @@ class UnverifiedRoleManager {
         const roles = await guild.roles.fetch()
         const botMember = await guild.members.fetchMe()
         if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
-            throw new Error('Bot needs Manage Roles to configure Unverified')
+            throw new Error(uiText('errors.manageRoles'))
         }
         let role
         if (this.roleId) {
             role = roles.get(this.roleId)
-            if (!role) throw new Error('Configured Unverified role does not exist')
+            if (!role) throw new Error(uiText('errors.missingUnverified'))
         } else {
-            const matches = roles.filter(role => role.name === 'Unverified')
-            if (matches.size > 1) throw new Error('Multiple Unverified roles exist; set TVM_UNVERIFIED_ROLE_ID')
+            const matches = roles.filter(role => role.name === uiText('roles.unverified'))
+            if (matches.size > 1) throw new Error(uiText('errors.ambiguousUnverified'))
             role = matches.first() || await guild.roles.create({
-                name: 'Unverified', permissions: [], mentionable: true,
-                reason: 'Identify roleless members who need TVM verification'
+                name: uiText('roles.unverified'), permissions: [], mentionable: true,
+                reason: uiText('roleReasons.create')
             })
         }
         if (role.id === guild.id || this.membershipRoleIds.includes(role.id) || role.managed ||
             role.permissions.bitfield !== 0n || botMember.roles.highest.comparePositionTo(role) <= 0) {
-            throw new Error('Unverified must be a separate role with no permissions, below the bot role')
+            throw new Error(uiText('errors.unsafeUnverified'))
         }
-        if (!role.mentionable) await role.setMentionable(true, 'Allow verification reminders to mention Unverified')
+        if (!role.mentionable) await role.setMentionable(true, uiText('roleReasons.mentionable'))
         this.roleId = role.id
         return role
     }
@@ -53,10 +55,10 @@ class UnverifiedRoleManager {
         })
         if (!member || !this.needsSync(member)) return null
         if (member.roles.cache.has(this.roleId)) {
-            await member.roles.remove(this.roleId, 'Member now has another role')
+            await member.roles.remove(this.roleId, uiText('roleReasons.remove'))
             return 'removed'
         }
-        await member.roles.add(this.roleId, 'Member has no assigned roles; needs TVM verification')
+        await member.roles.add(this.roleId, uiText('roleReasons.add'))
         return 'added'
     }
 
