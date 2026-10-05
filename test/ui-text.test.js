@@ -5,16 +5,27 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const vm = require('node:vm')
 const { uiText } = require('../src/tvm/uiText')
 
 test('renders codes and account mentions while treating inserted text literally', () => {
-    assert.match(uiText('email.codeBody', { code: '123456' }), /code is 123456/)
-    assert.equal(uiText('admin.transferred', { userId: '123456789012345678' }),
-        'Account transfer complete for <@123456789012345678>.')
+    // Exercise the formatter with fixed templates, independent of admin-edited copy.
+    const fixture = {
+        email: { codeBody: 'Code: {code}. Repeat: {code}.' },
+        admin: { transferred: 'Transferred to <@{userId}>.', operationFailed: 'Failed: {error}' }
+    }
+    const module = { exports: {} }
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../src/tvm/uiText.js'), 'utf8'), {
+        require: () => fixture, module
+    })
+    const render = module.exports.uiText
+    assert.equal(render('email.codeBody', { code: '123456' }), 'Code: 123456. Repeat: 123456.')
+    assert.equal(render('admin.transferred', { userId: '123456789012345678' }),
+        'Transferred to <@123456789012345678>.')
     const error = 'Unexpected $& {code}'
-    assert.equal(uiText('admin.operationFailed', { error }), `Operation failed: ${error}`)
-    assert.throws(() => uiText('email.codeBody'), /Missing UI text value: email.codeBody.code/)
-    assert.throws(() => uiText('missing.key'), /Missing UI text: missing.key/)
+    assert.equal(render('admin.operationFailed', { error }), `Failed: ${error}`)
+    assert.throws(() => render('email.codeBody'), { message: 'Missing UI text value: email.codeBody.code' })
+    assert.throws(() => render('missing.key'), { message: 'Missing UI text: missing.key' })
 })
 
 test('runtime text references exist in the config', () => {

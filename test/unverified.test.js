@@ -5,6 +5,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const { Collection, PermissionFlagsBits } = require('discord.js')
 const UnverifiedRoleManager = require('../src/tvm/UnverifiedRoleManager')
+const { uiText } = require('../src/tvm/uiText')
 
 function fixture() {
     const manager = new UnverifiedRoleManager('guild', 'unverified', ['member', 'exec', 'admin'])
@@ -74,7 +75,7 @@ function roleFixture(roleId = null, existing = []) {
     const manager = new UnverifiedRoleManager('guild', roleId, ['member', 'exec', 'admin'])
     const created = []
     const makeRole = (id, overrides = {}) => ({
-        id, name: 'Unverified', permissions: { bitfield: 0n }, managed: false, mentionable: true,
+        id, name: uiText('roles.unverified'), permissions: { bitfield: 0n }, managed: false, mentionable: true,
         ...overrides
     })
     const guild = {
@@ -119,7 +120,7 @@ test('rejects missing, ambiguous, managed, privileged, or conflicting roles', as
     hierarchy.guild.members.fetchMe = async () => ({
         permissions: { has: () => true }, roles: { highest: { comparePositionTo: () => -1 } }
     })
-    await assert.rejects(hierarchy.manager.initialize(hierarchy.guild), /below the bot/)
+    await assert.rejects(hierarchy.manager.initialize(hierarchy.guild), { message: uiText('errors.unsafeUnverified') })
 })
 
 test('enables mentions on an existing eligible role', async () => {

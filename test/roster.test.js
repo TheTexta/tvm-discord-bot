@@ -4,6 +4,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const { parseRoster } = require('../src/tvm/roster')
+const { uiText } = require('../src/tvm/uiText')
 
 test('parses member tiers while ignoring student numbers and other columns', () => {
     assert.deepEqual(parseRoster('Student ID,Email,Role,Note\n,"A@Example.org",Exec - Editor,"x,y"\n00123,b@example.org,Admin,member\n'), [
@@ -14,10 +15,18 @@ test('parses member tiers while ignoring student numbers and other columns', () 
 })
 
 test('rejects missing, empty, duplicate, and malformed email rosters', () => {
-    assert.throws(() => parseRoster('Student ID,Other\n1,x'), /Email and Role headers/)
-    assert.throws(() => parseRoster('Email,Role\n'), /cannot be empty/)
-    assert.throws(() => parseRoster('Email,Role\na@example.org,GM\nA@example.org,GM'), /Duplicate Email/)
-    assert.throws(() => parseRoster('Email,Role\ninvalid,GM'), /Invalid Email/)
-    assert.throws(() => parseRoster('Email,Role\na@example.org,unknown'), /Invalid Role/)
-    assert.throws(() => parseRoster('Email,Role,Note\na@example.org,GM'), /Invalid roster CSV/)
+    assert.throws(() => parseRoster('Student ID,Other\n1,x'), {
+        message: uiText('errors.invalidCsv', { error: uiText('errors.missingHeaders') })
+    })
+    assert.throws(() => parseRoster('Email,Role\n'), { message: uiText('errors.emptyRoster') })
+    assert.throws(() => parseRoster('Email,Role\na@example.org,GM\nA@example.org,GM'), {
+        message: uiText('errors.duplicateEmailRow', { row: 3 })
+    })
+    assert.throws(() => parseRoster('Email,Role\ninvalid,GM'), {
+        message: uiText('errors.invalidEmailRow', { row: 2 })
+    })
+    assert.throws(() => parseRoster('Email,Role\na@example.org,unknown'), {
+        message: uiText('errors.invalidRoleRow', { row: 2 })
+    })
+    assert.throws(() => parseRoster('Email,Role,Note\na@example.org,GM'), Error)
 })

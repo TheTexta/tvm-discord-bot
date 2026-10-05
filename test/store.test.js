@@ -8,6 +8,7 @@ const os = require('node:os')
 const path = require('node:path')
 const sqlite3 = require('sqlite3')
 const Store = require('../src/tvm/Store')
+const { uiText } = require('../src/tvm/uiText')
 
 test('requires a roster email, persists codes, and binds one Discord account', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvm-store-'))
@@ -22,7 +23,7 @@ test('requires a roster email, persists codes, and binds one Discord account', a
         ], 'admin')
         await assert.rejects(store.replaceRoster(guild, [
             { email: 'three@example.org', role: 'gm' }, { email: 'THREE@example.org', role: 'gm' }
-        ], 'admin'), /duplicate emails/)
+        ], 'admin'), { message: uiText('errors.rosterDuplicateEmails') })
         assert.equal((await store.status(guild)).count, 2)
         assert.deepEqual(await store.lookup(guild, 'ONE@example.org'), { email: 'one@example.org', role: 'exec' })
         assert.equal(await store.lookup(guild, 'outsider@example.org'), undefined)
@@ -151,7 +152,9 @@ test('roster replacement invalidates pending codes and send limits apply', async
         assert.equal(await store.allowRequest(guild, 'user-a', 'new@example.org'), true)
         assert.equal(await store.reserveSend(guild, 'user-a', 'new@example.org'), true)
         assert.equal(await store.reserveSend(guild, 'user-a', 'new@example.org'), false)
-        await assert.rejects(store.savePending(guild, 'user-b', 'old@example.org', '123456'), /absent/)
+        await assert.rejects(store.savePending(guild, 'user-b', 'old@example.org', '123456'), {
+            message: uiText('errors.emailAbsent')
+        })
     } finally {
         await store.close()
         fs.rmSync(dir, { recursive: true, force: true })
@@ -179,7 +182,9 @@ test('roster uploads preserve omitted members and existing claims while adding r
         assert.equal((await store.lookup(guild, 'new@example.org')).role, 'admin')
         assert.equal((await store.claimFor(guild, 'omitted@example.org')).user_id, 'user-a')
         assert.deepEqual(await store.removedClaims(guild), [])
-        await assert.rejects(store.mergeRoster(guild, [{ email: 'bad@example.org', role: 'owner' }], 'admin'), /invalid role/)
+        await assert.rejects(store.mergeRoster(guild, [{ email: 'bad@example.org', role: 'owner' }], 'admin'), {
+            message: uiText('errors.rosterInvalidRole')
+        })
         assert.equal((await store.status(guild)).count, 3)
     } finally {
         await store.close()
