@@ -64,7 +64,8 @@ function joinDeadline(shoot) {
 
 function joiningAllowed(shoot, now = Date.now()) {
     const deadline = joinDeadline(shoot)
-    return ['open', 'reopening'].includes(shoot.status) && (deadline == null || now < deadline)
+    return shoot.announcement_deleted_at == null && ['open', 'reopening'].includes(shoot.status) &&
+        (deadline == null || now < deadline)
 }
 
 function shootCommand() {
@@ -168,7 +169,7 @@ class ShootService {
                 throw new Error(uiText('shoot.configError'))
             }
         }
-        await this.reconcileAll()
+        await this.reconcileAll({ republishAnnouncements: true })
         this.timer = setInterval(() => this.reconcileAll().catch(error => this.report('reconcile', error)), 60000)
         this.timer.unref()
     }
@@ -228,7 +229,7 @@ class ShootService {
         }
         await interaction.deferReply({ flags: MessageFlags.Ephemeral })
         await this.withLock(shoot.id, async () => {
-            const current = await this.store.getShoot(shoot.id, interaction.guildId)
+            const current = await this.cleanupAnnouncement(await this.store.getShoot(shoot.id, interaction.guildId))
             if (action === 'crew') {
                 const rows = await this.store.shootParticipants(shoot.id)
                 const invited = rows.filter(row => row.invited).map(row => `<@${row.user_id}>`).join(' ') || uiText('shoot.crewEmpty')
@@ -255,8 +256,9 @@ class ShootService {
                 // Honor the current admission policy before changing it, including
                 // reactions added during an outage while the shoot was closed.
                 await this.reconcileReactions(current)
-                await this.store.updateShoot(shoot.id, { status: action === 'close' ? 'closing' : 'reopening' })
-                const result = await this.synchronize(shoot.id)
+                await this.store.updateShoot(shoot.id, { status: action === 'close' ? 'closing' : 'reopening',
+                    closed_at: action === 'close' ? (current.closed_at ?? Date.now()) : null })
+                const result = await this.synchronize(shoot.id, { republishAnnouncement: action === 'reopen' })
                 await interaction.editReply({ content: action === 'close' ? uiText('shoot.closedReply') :
                     uiText('shoot.reopenedReply', { channelId: result.channel_id }), allowedMentions: noMentions })
             }
@@ -291,7 +293,7 @@ class ShootService {
                 }
                 await this.store.updateShoot(id, details)
             } else throw new Error(uiText('shoot.expired'))
-            const result = await this.synchronize(id)
+            const result = await this.synchronize(id, { republishAnnouncement: action === 'edit' })
             await interaction.editReply({ content: action === 'setup' ? uiText('shoot.created', { channelId: result.channel_id }) :
                 uiText('shoot.updated'), allowedMentions: noMentions })
         })
@@ -323,7 +325,7 @@ class ShootService {
     render(shoot, kind, closed) {
         const deadline = joinDeadline(shoot)
         const expired = deadline != null && Date.now() >= deadline
-        const joinValue = deadline != null ? `<t:${Math.floor(deadline / 1000)}:F>` :
+        const joinValue = shoot.announcement_deleted_at != null ? uiText('shoot.joinUnavailable') : deadline != null ? `<t:${Math.floor(deadline / 1000)}:F>` :
             (shoot.join_period === 'never' ? uiText('shoot.joinNever') :
                 uiText('shoot.joinPending', { period: uiText(PERIOD_TEXT[shoot.join_period]) }))
         const embed = new EmbedBuilder().setTitle(escapeMarkdown(shoot.name)).setColor(closed ? 0x747f8d : 0x9b59b6)
@@ -341,20 +343,43 @@ class ShootService {
                 uiText('shoot.invitation')) : '', allowedMentions: noMentions }
     }
 
-    async ensureMessage(channel, shoot, kind, column, closed) {
+    async ensureMessage(channel, shoot, kind, column, closed, republishAnnouncement = false) {
+        const invitation = kind === 'invitation'
+        const republish = republishAnnouncement || Boolean(shoot.announcement_republish_pending)
+        // Cleanup remains final while a shoot is closed. Reopening may republish.
+        if (invitation && closed && shoot.closed_at != null && Date.now() >= shoot.closed_at + 86400000) return null
+        if (invitation && shoot.announcement_deleted_at != null && !republish) return null
         let message = await this.fetchMessage(channel, shoot[column])
-        if (!message) message = await this.recoverMessage(channel, shoot, kind)
-        const payload = this.render(shoot, kind, closed)
-        const invited = kind === 'invitation' ? (await this.store.shootParticipants(shoot.id))
-            .filter(row => row.invited && row.user_id !== shoot.organizer_id) : []
-        if (invited.length) payload.content += '\n' + uiText('shoot.directInvites', {
-            members: invited.slice(0, 70).map(row => `<@${row.user_id}>`).join(' ')
-        })
-        if (invited.length > 70) payload.content += '\n' + uiText('shoot.directInvitesMore', { count: invited.length - 70 })
-        if (!message) {
-            if (kind === 'invitation' && !shoot.announcement_id) {
-                payload.allowedMentions = { parse: [], users: invited.map(row => row.user_id) }
+        if (invitation && !message && (shoot[column] || closed) && !republish) {
+            // Routine synchronization honors deletion. Important events may publish
+            // again; persist that intent before sending so ambiguous failures retry.
+            if (shoot.announcement_deleted_at == null) {
+                await this.store.updateShoot(shoot.id, { announcement_deleted_at: Date.now() })
             }
+            return null
+        }
+        if (invitation && !message && republish && !shoot.announcement_republish_pending) {
+            await this.store.updateShoot(shoot.id, { announcement_republish_pending: 1 })
+        }
+        if (!message) message = await this.recoverMessage(channel, shoot, kind)
+        const payload = this.render(invitation ? { ...shoot, announcement_deleted_at: null } : shoot, kind, closed)
+        if (kind === 'brief') {
+            const names = []
+            const guild = await this.client.guilds.fetch(shoot.guild_id)
+            for (const row of await this.store.shootParticipants(shoot.id)) {
+                if (!row.invited || row.user_id === shoot.organizer_id) continue
+                const member = await guild.members.fetch({ user: row.user_id, force: true }).catch(error => {
+                    if (error.code === 10007) return null
+                    throw error
+                })
+                const name = member?.displayName || member?.user.globalName || member?.user.username ||
+                    uiText('shoot.formerMember', { userId: row.user_id })
+                names.push(escapeMarkdown(name.replace(/<@/g, '＜@')).slice(0, 48))
+            }
+            payload.embeds[0].addFields(...this.memberFields(uiText('shoot.crewInvited'),
+                names.join(', ') || uiText('shoot.crewEmpty')))
+        }
+        if (!message) {
             const nonce = crypto.createHash('sha256').update(`${shoot.id}:${kind}:${shoot[column] || ''}`).digest('hex').slice(0, 24)
             message = await channel.send({ ...payload, nonce, enforceNonce: true })
         } else {
@@ -362,7 +387,13 @@ class ShootService {
                 await message.edit(payload)
             }
         }
-        if (shoot[column] !== message.id) await this.store.updateShoot(shoot.id, { [column]: message.id })
+        const values = {}
+        if (shoot[column] !== message.id) values[column] = message.id
+        if (invitation && (shoot.announcement_deleted_at != null || republish)) {
+            values.announcement_deleted_at = null
+            values.announcement_republish_pending = 0
+        }
+        if (Object.keys(values).length) await this.store.updateShoot(shoot.id, values)
         if (kind === 'brief' && !message.pinned) await message.pin(uiText('shoot.reason'))
         return message
     }
@@ -377,8 +408,9 @@ class ShootService {
         return ids
     }
 
-    async synchronize(id) {
+    async synchronize(id, { republishAnnouncement = false } = {}) {
         let shoot = await this.store.getShoot(id, this.config.guildId)
+        shoot = await this.cleanupAnnouncement(shoot)
         if (!ACTIVE_STATUSES.includes(shoot.status)) throw new Error(uiText('shoot.missingChannel'))
         const guild = await this.client.guilds.fetch(this.config.guildId)
         const closed = ['closing', 'closed'].includes(shoot.status)
@@ -425,19 +457,52 @@ class ShootService {
         }
         await this.ensureMessage(channel, shoot, 'brief', 'brief_id', closed)
         const announcementChannel = await guild.channels.fetch(this.settings.announcementChannelId)
-        const announcement = await this.ensureMessage(announcementChannel, shoot, 'invitation', 'announcement_id', closed)
-        if (shoot.join_started_at == null) {
+        const announcement = await this.ensureMessage(announcementChannel, shoot, 'invitation', 'announcement_id', closed, republishAnnouncement)
+        const beforeAnnouncement = shoot
+        shoot = await this.store.getShoot(id, guild.id)
+        if (beforeAnnouncement.announcement_deleted_at !== shoot.announcement_deleted_at) {
+            await this.ensureMessage(channel, shoot, 'brief', 'brief_id', closed)
+        }
+        if (announcement && shoot.join_started_at == null) {
             // Use the actual publication time even when recovering a lost send response.
             await this.store.updateShoot(id, { join_started_at: announcement.createdTimestamp ?? shoot.created_at })
             shoot = await this.store.getShoot(id, guild.id)
             await this.ensureMessage(channel, shoot, 'brief', 'brief_id', closed)
             await this.ensureMessage(announcementChannel, shoot, 'invitation', 'announcement_id', closed)
         }
-        if (!announcement.reactions.cache.get(EMOJI)?.me) await announcement.react(EMOJI)
+        if (announcement && !closed && !announcement.reactions.cache.get(EMOJI)?.me) await announcement.react(EMOJI)
         if (['provisioning', 'closing', 'reopening'].includes(shoot.status)) {
             await this.store.updateShoot(id, { status: closed ? 'closed' : 'open' })
         }
         return this.store.getShoot(id, guild.id)
+    }
+
+    async cleanupAnnouncement(shoot) {
+        if ((shoot.announcement_deleted_at != null && !shoot.announcement_republish_pending) ||
+            !['closing', 'closed', 'missing'].includes(shoot.status)) return shoot
+        const guild = await this.client.guilds.fetch(shoot.guild_id)
+        const channel = await guild.channels.fetch(this.settings.announcementChannelId)
+        if (shoot.closed_at == null) {
+            if (shoot.status === 'missing') return shoot
+            // Older releases did not store close times. The existing closed message
+            // gives the best available date; persist it once so retries cannot reset it.
+            const message = await this.fetchMessage(channel, shoot.announcement_id)
+            await this.store.updateShoot(shoot.id, { closed_at: message?.editedTimestamp ?? message?.createdTimestamp ?? Date.now() })
+            shoot = await this.store.getShoot(shoot.id, shoot.guild_id)
+        }
+        if (Date.now() < shoot.closed_at + 86400000) return shoot
+        const messageIds = new Set(shoot.announcement_id ? [shoot.announcement_id] : [])
+        if (shoot.announcement_republish_pending) {
+            const recovered = await this.recoverMessage(channel, shoot, 'invitation')
+            if (recovered) messageIds.add(recovered.id)
+        }
+        for (const messageId of messageIds) {
+            await channel.messages.delete(messageId).catch(error => {
+                if (error.code !== 10008) throw error
+            })
+        }
+        await this.store.updateShoot(shoot.id, { announcement_deleted_at: Date.now(), announcement_republish_pending: 0 })
+        return this.store.getShoot(shoot.id, shoot.guild_id)
     }
 
     async reactionUsers(message) {
@@ -457,12 +522,15 @@ class ShootService {
     }
 
     async reconcileReactions(shoot) {
-        if (!shoot.announcement_id || !ACTIVE_STATUSES.includes(shoot.status)) return
+        if (!shoot.announcement_id || shoot.announcement_deleted_at != null || !ACTIVE_STATUSES.includes(shoot.status)) return
         const guild = await this.client.guilds.fetch(this.config.guildId)
         const channel = await guild.channels.fetch(this.settings.announcementChannelId)
         const message = await this.fetchMessage(channel, shoot.announcement_id)
-        // A deleted invitation is not a mass withdrawal. Recreate it in synchronize().
-        if (!message) return
+        // Deleting an invitation preserves membership. Routine sync does not republish it.
+        if (!message) {
+            await this.store.updateShoot(shoot.id, { announcement_deleted_at: Date.now() })
+            return
+        }
         const users = await this.reactionUsers(message)
         const rows = await this.store.shootParticipants(shoot.id)
         let enrolled = rows.filter(row => row.invited || row.reacted).length
@@ -520,17 +588,18 @@ class ShootService {
         await this.onReaction({ message, emoji: { id: null, name: EMOJI } }, { bot: false })
     }
 
-    async reconcileAll() {
+    async reconcileAll({ republishAnnouncements = false } = {}) {
         if (!this.settings || this.running) return
         this.running = true
         try {
             for (const shoot of await this.store.allShoots(this.config.guildId)) {
-                if (!ACTIVE_STATUSES.includes(shoot.status)) continue
+                if (!ACTIVE_STATUSES.includes(shoot.status) && shoot.closed_at == null) continue
                 try {
                     await this.withLock(shoot.id, async () => {
-                        const current = await this.store.getShoot(shoot.id, this.config.guildId)
+                        const current = await this.cleanupAnnouncement(await this.store.getShoot(shoot.id, this.config.guildId))
+                        if (!ACTIVE_STATUSES.includes(current.status)) return
                         await this.reconcileReactions(current)
-                        await this.synchronize(shoot.id)
+                        await this.synchronize(shoot.id, { republishAnnouncement: republishAnnouncements })
                     })
                 } catch (error) { await this.report(shoot.id, error) }
             }

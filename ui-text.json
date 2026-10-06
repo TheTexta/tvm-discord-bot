@@ -162,9 +162,8 @@
     "chatField": "Shoot chat",
     "statusOpen": "Open",
     "statusClosed": "Closed — read-only archive",
-    "invitation": "React 🎬 to join; remove your reaction to leave. Verified TVM members and administrators can join.",
+    "invitation": "React 🎬 to join; remove your reaction to leave.",
     "closedInvitation": "This shoot is closed. New joins are disabled; existing participants can read the archive.",
-    "directInvites": "Direct invitations: {members}",
     "crewHeading": "Participants for {name}",
     "crewInvited": "Direct invitations",
     "crewReaction": "Joined by reaction",
@@ -189,6 +188,7 @@
     "invalidJoinPeriod": "Choose 1 day, 2 days, week, month, or never for the reaction joining window.",
     "unscheduled": "Unscheduled",
     "expiredInvitation": "Reaction joining has expired. The shoot chat remains open; ask an admin to add you with /shoot add. Existing members can remove their reaction to leave.",
-    "directInvitesMore": "{count} more direct invitations; admins can view the full list with /shoot crew."
+    "joinUnavailable": "Announcement removed; ask an admin to add members with /shoot add.",
+    "formerMember": "Former member ({userId})"
   }
 }

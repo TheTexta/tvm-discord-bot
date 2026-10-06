@@ -45,7 +45,7 @@ async function fixture(t) {
     })
     for (const [name, id] of Object.entries(IDS)) {
         if (!['bot', 'admin', 'invited', 'joined', 'outsider', 'extra'].includes(name)) continue
-        const user = { id, bot: name === 'bot', send: async payload => { notices.push({ id, payload }) } }
+        const user = { id, username: name, bot: name === 'bot', send: async payload => { notices.push({ id, payload }) } }
         const member = { id, user, roles: { cache: new Collection() }, permissions: new PermissionsBitField(name === 'admin' || name === 'bot' ? P.Administrator : 0n) }
         members.set(id, member)
     }
@@ -67,7 +67,12 @@ async function fixture(t) {
                 }
                 return object
             },
-            messages: { cache: messages, fetch: async input => {
+            messages: { cache: messages, delete: async id => {
+                if (object.failDelete) { object.failDelete = false; throw new Error('announcement deletion failed') }
+                if (!messages.has(id)) throw Object.assign(new Error('Unknown Message'), { code: 10008 })
+                messages.delete(id)
+                if (object.failDeleteAfter) { object.failDeleteAfter = false; throw new Error('delete response lost') }
+            }, fetch: async input => {
                 if (typeof input === 'string' || input.message) {
                     const id = typeof input === 'string' ? input : input.message
                     assert.equal(input.force, true, 'stored messages must bypass cached reaction state')
@@ -239,7 +244,7 @@ test('setup creates one private chat, pinned brief, invitation, and immutable in
     assert.ok(chat.permissionOverwrites.cache.get(IDS.guild).deny.has(P.ViewChannel))
     assert.ok(chat.permissionOverwrites.cache.get(IDS.invited).deny.has(P.CreatePublicThreads))
     assert.equal(chat.messages.cache.get(shoot.brief_id).pinned, true)
-    assert.deepEqual(f.channels.get(IDS.announce).sends[0].allowedMentions, { parse: [], users: [IDS.invited] })
+    assert.deepEqual(f.channels.get(IDS.announce).sends[0].allowedMentions, { parse: [] })
     assert.ok(submit.replies.at(-1).content.includes(shoot.channel_id))
     const invitation = f.channels.get(IDS.announce).messages.cache.get(shoot.announcement_id)
     assert.ok(invitation.reactions.cache.get('🎬').me)
@@ -408,7 +413,7 @@ test('failed close stays durable and retries without exposing inherited category
     assert.equal(allows(chat, IDS.invited, P.SendMessages), false)
 })
 
-test('deleted messages recover without mass withdrawals; a deleted chat is never recreated', async t => {
+test('deleted briefs recover, announcements remain deleted, and a deleted chat is never recreated', async t => {
     const f = await fixture(t)
     let { shoot } = await f.create()
     await f.react(shoot, 'joined')
@@ -419,14 +424,16 @@ test('deleted messages recover without mass withdrawals; a deleted chat is never
     await f.service.reconcileAll()
     const recovered = await f.store.getShoot(shoot.id, IDS.guild)
     assert.notEqual(recovered.brief_id, shoot.brief_id)
-    assert.notEqual(recovered.announcement_id, shoot.announcement_id)
+    assert.equal(recovered.announcement_id, shoot.announcement_id)
+    assert.ok(recovered.announcement_deleted_at)
+    assert.equal(f.channels.get(IDS.announce).sends.length, 1)
     assert.ok(allows(chat, IDS.joined, P.ViewChannel))
     assert.deepEqual(f.channels.get(IDS.announce).sends.at(-1).allowedMentions, { parse: [] })
     shoot = recovered
-    // A reaction on the replacement message reestablishes the leave signal.
-    await f.react(shoot, 'joined')
-    await f.react(shoot, 'joined', false)
-    assert.equal(chat.permissionOverwrites.cache.has(IDS.joined), false)
+    await f.restart()
+    await f.service.reconcileAll()
+    assert.equal(f.channels.get(IDS.announce).sends.length, 1)
+    assert.ok(allows(chat, IDS.joined, P.ViewChannel))
     f.channels.delete(shoot.channel_id)
     const count = f.channels.size
     await f.service.reconcileAll()
@@ -827,4 +834,259 @@ test('removing Admin Team from a verified archived participant restores read-onl
     assert.ok(allows(chat, participant.id, P.ViewChannel))
     assert.equal(allows(chat, participant.id, P.SendMessages), false)
     assert.ok(chat.permissionOverwrites.cache.get(participant.id).deny.has(P.SendMessages))
+})
+
+test('direct invitations are names only in the private brief and never appear in announcements', async t => {
+    const f = await fixture(t)
+    f.members.get(IDS.invited).displayName = 'Owen (Executive Producer)'
+    const { shoot } = await f.create()
+    const announcement = f.channels.get(IDS.announce).messages.cache.get(shoot.announcement_id)
+    const brief = f.channels.get(shoot.channel_id).messages.cache.get(shoot.brief_id)
+    assert.equal(announcement.content, 'React 🎬 to join; remove your reaction to leave.')
+    assert.doesNotMatch(JSON.stringify(announcement.embeds), /Owen|Direct invitations/)
+    assert.doesNotMatch(announcement.content, /<@|Verified TVM/)
+    const invited = brief.embeds[0].toJSON().fields.filter(field => field.name === 'Direct invitations')
+    assert.equal(invited.length, 1)
+    assert.match(invited[0].value, /Owen/)
+    assert.doesNotMatch(invited[0].value, /<@/)
+    await f.service.handleInteraction(f.interaction({ command: 'add', channelId: shoot.channel_id }))
+    const updated = brief.embeds[0].toJSON().fields.filter(field => field.name === 'Direct invitations')
+    assert.match(updated.map(field => field.value).join(' '), /extra/)
+    for (const channel of [f.channels.get(IDS.announce), f.channels.get(shoot.channel_id)]) {
+        for (const payload of [...channel.sends, ...[...channel.messages.cache.values()].flatMap(message => message.edits)]) {
+            assert.deepEqual(payload.allowedMentions, { parse: [] })
+        }
+    }
+})
+
+test('routine sync and reaction events honor deleted announcements; edit can republish once', async t => {
+    const f = await fixture(t)
+    const { shoot } = await f.create()
+    const announcementChannel = f.channels.get(IDS.announce)
+    await f.react(shoot, 'joined')
+    announcementChannel.messages.cache.delete(shoot.announcement_id)
+    await Promise.all([
+        f.service.onReaction({ message: { id: shoot.announcement_id, guildId: IDS.guild, channelId: IDS.announce },
+            emoji: { name: '🎬' } }, f.members.get(IDS.joined).user),
+        f.service.reconcileAll()
+    ])
+    await f.service.reconcileAll()
+    let current = await f.store.getShoot(shoot.id, IDS.guild)
+    assert.ok(current.announcement_deleted_at)
+    assert.equal(joiningAllowed(current), false)
+    assert.equal(announcementChannel.sends.length, 1)
+    await f.service.handleInteraction(f.interaction({ command: 'add', channelId: shoot.channel_id }))
+    assert.equal(announcementChannel.sends.length, 1)
+    const edit = f.interaction({ command: 'edit', channelId: shoot.channel_id })
+    await f.service.handleInteraction(edit)
+    const submit = f.interaction({ customId: edit.modal.custom_id, channelId: shoot.channel_id })
+    submit.fields = fields('Edited shoot')
+    await f.service.handleInteraction(submit)
+    current = await f.store.getShoot(shoot.id, IDS.guild)
+    assert.equal(current.announcement_deleted_at, null)
+    assert.notEqual(current.announcement_id, shoot.announcement_id)
+    assert.equal(current.join_started_at, shoot.join_started_at)
+    assert.equal(announcementChannel.messages.cache.size, 1)
+    assert.equal(announcementChannel.sends.length, 2)
+    assert.ok(allows(f.channels.get(shoot.channel_id), IDS.joined, P.ViewChannel))
+    assert.ok(allows(f.channels.get(shoot.channel_id), IDS.extra, P.SendMessages))
+    await f.react(current, 'joined')
+    await f.react(current, 'joined', false)
+    assert.equal(f.channels.get(shoot.channel_id).permissionOverwrites.cache.has(IDS.joined), false)
+    await f.service.reconcileAll()
+    assert.equal(announcementChannel.sends.length, 2)
+    assert.equal(f.errors.length, 0)
+})
+
+test('closed announcement is removed at the 24-hour boundary without losing archive access', async t => {
+    const f = await fixture(t)
+    const { shoot } = await f.create()
+    await f.react(shoot, 'joined')
+    await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id }))
+    const channel = f.channels.get(IDS.announce)
+    const closed = await f.store.getShoot(shoot.id, IDS.guild)
+    assert.ok(closed.closed_at)
+    await f.store.updateShoot(shoot.id, { closed_at: Date.now() - 86400000 + 60000 })
+    await f.service.reconcileAll()
+    assert.equal(channel.messages.cache.has(shoot.announcement_id), true)
+    await f.store.updateShoot(shoot.id, { closed_at: Date.now() - 86400000 })
+    await f.restart()
+    await f.service.reconcileAll()
+    const removed = await f.store.getShoot(shoot.id, IDS.guild)
+    assert.ok(removed.announcement_deleted_at)
+    assert.equal(channel.messages.cache.has(shoot.announcement_id), false)
+    const chat = f.channels.get(shoot.channel_id)
+    assert.ok(allows(chat, IDS.joined, P.ViewChannel))
+    assert.equal(allows(chat, IDS.joined, P.SendMessages), false)
+    await f.service.handleInteraction(f.interaction({ command: 'reopen', channelId: shoot.channel_id }))
+    assert.ok(allows(chat, IDS.joined, P.SendMessages))
+    assert.equal((await f.store.getShoot(shoot.id, IDS.guild)).closed_at, null)
+    assert.equal(channel.sends.length, 2)
+    assert.equal(channel.messages.cache.size, 1)
+    assert.equal(f.errors.length, 0)
+})
+
+test('reopening before cleanup cancels deletion and a later close starts a fresh 24-hour period', async t => {
+    const f = await fixture(t)
+    const { shoot } = await f.create()
+    await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id }))
+    const firstClose = Date.now() - 3600000
+    await f.store.updateShoot(shoot.id, { closed_at: firstClose })
+    await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id }))
+    assert.equal((await f.store.getShoot(shoot.id, IDS.guild)).closed_at, firstClose)
+    await f.service.handleInteraction(f.interaction({ command: 'reopen', channelId: shoot.channel_id }))
+    await f.service.reconcileAll()
+    assert.equal((await f.store.getShoot(shoot.id, IDS.guild)).closed_at, null)
+    assert.equal(f.channels.get(IDS.announce).messages.cache.has(shoot.announcement_id), true)
+    await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id }))
+    assert.ok((await f.store.getShoot(shoot.id, IDS.guild)).closed_at > firstClose)
+})
+
+test('announcement deletion failures and lost responses retry durably without republishing', async t => {
+    for (const failure of ['failDelete', 'failDeleteAfter']) {
+        const f = await fixture(t)
+        const { shoot } = await f.create()
+        await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id }))
+        const closedAt = Date.now() - 90000000
+        await f.store.updateShoot(shoot.id, { closed_at: closedAt })
+        f.channels.get(IDS.announce)[failure] = true
+        await f.service.reconcileAll()
+        assert.equal((await f.store.getShoot(shoot.id, IDS.guild)).announcement_deleted_at, null)
+        assert.equal(f.errors.length, 1)
+        await f.restart()
+        await f.service.reconcileAll()
+        const removed = await f.store.getShoot(shoot.id, IDS.guild)
+        assert.ok(removed.announcement_deleted_at)
+        assert.equal(removed.closed_at, closedAt)
+        assert.equal(f.channels.get(IDS.announce).messages.cache.has(shoot.announcement_id), false)
+        assert.equal(f.channels.get(IDS.announce).sends.length, 1)
+    }
+})
+
+test('closed announcement cleanup still runs if the shoot channel is deleted', async t => {
+    const f = await fixture(t)
+    const { shoot } = await f.create()
+    await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id }))
+    f.channels.delete(shoot.channel_id)
+    await f.service.reconcileAll()
+    assert.equal((await f.store.getShoot(shoot.id, IDS.guild)).status, 'missing')
+    await f.store.updateShoot(shoot.id, { closed_at: Date.now() - 90000000 })
+    await f.service.reconcileAll()
+    assert.ok((await f.store.getShoot(shoot.id, IDS.guild)).announcement_deleted_at)
+    assert.equal(f.channels.get(IDS.announce).messages.cache.size, 0)
+})
+
+test('older databases add cleanup fields and use the existing closed announcement time', async t => {
+    const f = await fixture(t)
+    const { shoot } = await f.create()
+    await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id }))
+    const oldClosedAt = Date.now() - 90000000
+    f.channels.get(IDS.announce).messages.cache.get(shoot.announcement_id).editedTimestamp = oldClosedAt
+    await f.store._locked(() => f.store._exec('ALTER TABLE shoots DROP COLUMN closed_at; ALTER TABLE shoots DROP COLUMN announcement_deleted_at; ALTER TABLE shoots DROP COLUMN announcement_republish_pending;'))
+    await f.restart()
+    assert.equal((await f.store.getShoot(shoot.id, IDS.guild)).announcement_deleted_at, null)
+    await f.service.reconcileAll()
+    const current = await f.store.getShoot(shoot.id, IDS.guild)
+    assert.equal(current.closed_at, oldClosedAt)
+    assert.ok(current.announcement_deleted_at)
+    assert.equal(f.channels.get(IDS.announce).sends.length, 1)
+})
+
+test('bot startup can republish deleted announcements while routine reconnect sync cannot', async t => {
+    const f = await fixture(t)
+    const { shoot } = await f.create()
+    const channel = f.channels.get(IDS.announce)
+    channel.messages.cache.delete(shoot.announcement_id)
+    await f.service.reconcileAll()
+    await f.service.reconcileAll()
+    assert.equal(channel.sends.length, 1)
+    await f.restart()
+    await f.service.initialize()
+    const current = await f.store.getShoot(shoot.id, IDS.guild)
+    assert.notEqual(current.announcement_id, shoot.announcement_id)
+    assert.equal(current.announcement_deleted_at, null)
+    assert.equal(current.join_started_at, shoot.join_started_at)
+    assert.equal(channel.sends.length, 2)
+    await f.service.reconcileAll()
+    assert.equal(channel.sends.length, 2)
+    assert.equal(f.errors.length, 0)
+})
+
+test('reopening republishes a manually deleted closed announcement without resetting the deadline', async t => {
+    const f = await fixture(t)
+    const { shoot } = await f.create()
+    await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id }))
+    const channel = f.channels.get(IDS.announce)
+    channel.messages.cache.delete(shoot.announcement_id)
+    await f.service.reconcileAll()
+    assert.equal(channel.sends.length, 1)
+    await f.service.handleInteraction(f.interaction({ command: 'reopen', channelId: shoot.channel_id }))
+    const current = await f.store.getShoot(shoot.id, IDS.guild)
+    assert.equal(current.status, 'open')
+    assert.equal(current.join_started_at, shoot.join_started_at)
+    assert.equal(channel.sends.length, 2)
+    assert.ok(channel.messages.cache.get(current.announcement_id).reactions.cache.get('🎬').me)
+})
+
+test('closed cleanup stays final through edits and startup until explicitly reopened', async t => {
+    const f = await fixture(t)
+    const { shoot } = await f.create()
+    await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id }))
+    await f.store.updateShoot(shoot.id, { closed_at: Date.now() - 90000000 })
+    await f.service.reconcileAll()
+    const edit = f.interaction({ command: 'edit', channelId: shoot.channel_id })
+    await f.service.handleInteraction(edit)
+    await f.service.handleInteraction(f.interaction({ customId: edit.modal.custom_id, channelId: shoot.channel_id }))
+    await f.restart()
+    await f.service.initialize()
+    assert.equal(f.channels.get(IDS.announce).messages.cache.size, 0)
+    assert.equal(f.channels.get(IDS.announce).sends.length, 1)
+    assert.equal(f.errors.length, 0)
+})
+
+test('important-event publication intent survives a lost send response and routine retry', async t => {
+    const f = await fixture(t)
+    const { shoot } = await f.create()
+    const channel = f.channels.get(IDS.announce)
+    channel.messages.cache.delete(shoot.announcement_id)
+    await f.service.reconcileAll()
+    const edit = f.interaction({ command: 'edit', channelId: shoot.channel_id })
+    await f.service.handleInteraction(edit)
+    channel.failSendAfter = true
+    await f.service.handleInteraction(f.interaction({ customId: edit.modal.custom_id, channelId: shoot.channel_id }))
+    const pending = await f.store.getShoot(shoot.id, IDS.guild)
+    assert.equal(pending.announcement_republish_pending, 1)
+    assert.equal(pending.announcement_id, shoot.announcement_id)
+    assert.equal(channel.messages.cache.size, 1)
+    await f.restart()
+    await f.service.reconcileAll()
+    const current = await f.store.getShoot(shoot.id, IDS.guild)
+    assert.equal(current.announcement_republish_pending, 0)
+    assert.equal(current.announcement_deleted_at, null)
+    assert.notEqual(current.announcement_id, shoot.announcement_id)
+    assert.equal(channel.sends.length, 2)
+    assert.deepEqual(channel.sends.at(-1).allowedMentions, { parse: [] })
+})
+
+test('a closed announcement with a lost republication response is cleaned up when its original deadline arrives', async t => {
+    const f = await fixture(t)
+    const { shoot } = await f.create()
+    const channel = f.channels.get(IDS.announce)
+    await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id }))
+    channel.messages.cache.delete(shoot.announcement_id)
+    await f.service.reconcileAll()
+    const edit = f.interaction({ command: 'edit', channelId: shoot.channel_id })
+    await f.service.handleInteraction(edit)
+    channel.failSendAfter = true
+    await f.service.handleInteraction(f.interaction({ customId: edit.modal.custom_id, channelId: shoot.channel_id }))
+    assert.equal(channel.messages.cache.size, 1)
+    assert.equal((await f.store.getShoot(shoot.id, IDS.guild)).announcement_republish_pending, 1)
+    await f.store.updateShoot(shoot.id, { closed_at: Date.now() - 90000000 })
+    await f.restart()
+    await f.service.initialize()
+    const current = await f.store.getShoot(shoot.id, IDS.guild)
+    assert.equal(current.announcement_republish_pending, 0)
+    assert.ok(current.announcement_deleted_at)
+    assert.equal(channel.messages.cache.size, 0)
+    assert.equal(channel.sends.length, 2)
 })

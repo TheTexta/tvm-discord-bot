@@ -51,7 +51,8 @@ class Store {
                 name TEXT NOT NULL DEFAULT '', call_time INTEGER, location TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'draft', channel_id TEXT UNIQUE, brief_id TEXT,
                 announcement_id TEXT UNIQUE, created_at INTEGER NOT NULL, revision INTEGER NOT NULL DEFAULT 0,
-                join_period TEXT NOT NULL DEFAULT 'never', join_started_at INTEGER);
+                join_period TEXT NOT NULL DEFAULT 'never', join_started_at INTEGER,
+                announcement_deleted_at INTEGER, closed_at INTEGER, announcement_republish_pending INTEGER NOT NULL DEFAULT 0);
             CREATE INDEX IF NOT EXISTS idx_shoots_guild ON shoots(guild_id);
             CREATE TABLE IF NOT EXISTS shoot_participants (
                 shoot_id TEXT NOT NULL, user_id TEXT NOT NULL, invited INTEGER NOT NULL DEFAULT 0,
@@ -64,7 +65,10 @@ class Store {
                 ['email_claims', 'managed_admin_role', 'INTEGER NOT NULL DEFAULT 0'],
                 ['shoot_participants', 'reaction_message_id', 'TEXT'],
                 ['shoots', 'join_period', "TEXT NOT NULL DEFAULT 'never'"],
-                ['shoots', 'join_started_at', 'INTEGER']
+                ['shoots', 'join_started_at', 'INTEGER'],
+                ['shoots', 'announcement_deleted_at', 'INTEGER'],
+                ['shoots', 'closed_at', 'INTEGER'],
+                ['shoots', 'announcement_republish_pending', 'INTEGER NOT NULL DEFAULT 0']
             ]) {
                 const columns = await this._all(`PRAGMA table_info(${table})`)
                 if (!columns.some(item => item.name === column)) await this._exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`)
@@ -400,7 +404,7 @@ class Store {
     }
     updateShoot(id, values) {
         const allowed = ['name', 'call_time', 'location', 'status', 'channel_id', 'brief_id', 'announcement_id',
-            'join_period', 'join_started_at']
+            'join_period', 'join_started_at', 'announcement_deleted_at', 'closed_at', 'announcement_republish_pending']
         const keys = Object.keys(values)
         if (!keys.length || keys.some(key => !allowed.includes(key))) throw new Error('Invalid shoot update')
         return this._locked(() => this._run(`UPDATE shoots SET ${keys.map(key => `${key} = ?`).join(', ')},
