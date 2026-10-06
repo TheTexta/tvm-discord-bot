@@ -4,28 +4,19 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const { createApp } = require('../src/tvm/App')
+const { prepareClient } = require('./helpers/runtime')
 const discord = require('discord.js')
 const { canManageBot } = require('../src/tvm/permissions')
 
 const adminRoleId = '100000000000000012'
 const guildId = '100000000000000001'
 
-function runtime() {
-    const events = new Map(),
-        mail = [],
+async function runtime(t) {
+    const mail = [],
         sent = []
-    class Client {
-        on(event, callback) {
-            events.set(event, callback)
-        }
-        once() {}
-        off(event) {
-            events.delete(event)
-        }
-        destroy() {}
-        async login() {} // Never connect this test runtime to Discord.
-    }
     class Store {
+        async sweep() {}
+        async close() {}
         async status() {
             return { count: 2, unreconciled: 0, meta: { version: 1 } }
         }
@@ -48,17 +39,24 @@ function runtime() {
         }
     }
     class Unverified {
+        async initialize() {
+            return { id: 'unverified' }
+        }
         async syncGuild() {
             return { added: 0, removed: 0, failed: 0 }
         }
     }
+    const prepared = prepareClient()
+    const client = prepared.client
     const app = createApp({
-        config: { guildId, adminRoleId },
-        client: new Client(),
+        config: { ...prepared.config, guildId, adminRoleId },
+        client,
+        rest: prepared.rest,
         store: new Store(),
         mail: new Mail(),
         unverifiedRoles: new Unverified(),
         shoots: {
+            async initialize() {},
             async handleInteraction() {
                 return false
             },
@@ -103,12 +101,14 @@ function runtime() {
             }
         }
     }
-    return { handle: events.get('interactionCreate'), interaction, commands: app.commands, mail, sent }
+    await app.start()
+    t?.after(() => app.shutdown())
+    return { handle: client.listeners('interactionCreate')[0], interaction, commands: app.commands, mail, sent }
 }
 
-test('Admin Team and Discord administrators can use the active runtime’s management commands', async () => {
+test('Admin Team and Discord administrators can use the active runtime’s management commands', async (t) => {
     for (const authority of [{ role: true }, { role: false, administrator: true }]) {
-        const app = runtime()
+        const app = await runtime(t)
         for (const command of ['postverify', 'testmail', 'upload', 'roster']) {
             const interaction = app.interaction(command, authority)
             await app.handle(interaction)
@@ -132,8 +132,8 @@ test('Admin Team and Discord administrators can use the active runtime’s manag
     }
 })
 
-test('ordinary members and bots cannot invoke management commands; verification remains public', async () => {
-    const app = runtime()
+test('ordinary members and bots cannot invoke management commands; verification remains public', async (t) => {
+    const app = await runtime(t)
     for (const authority of [
         { role: false },
         { role: true, bot: true },
@@ -160,8 +160,8 @@ test('ordinary members and bots cannot invoke management commands; verification 
     assert.equal(wrongGuild.replies.length, 0)
 })
 
-test('authorization supports raw member roles, rejects namesakes, and rechecks role removal', () => {
-    const app = runtime()
+test('authorization supports raw member roles, rejects namesakes, and rechecks role removal', async (t) => {
+    const app = await runtime(t)
     const interaction = app.interaction('roster', { role: false })
     interaction.member = { roles: [adminRoleId] }
     assert.equal(canManageBot(interaction, adminRoleId), true)

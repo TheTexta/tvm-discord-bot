@@ -89,7 +89,7 @@ function createRosterCommands({
                 const roster = await store.lookup(config.guildId, email)
                 const claim = await store.claimFor(config.guildId, email)
                 if (!roster || !claim) throw new Error(uiText('errors.noActiveClaim'))
-                const member = await interaction.guild.members.fetch(claim.user_id)
+                const member = await interaction.guild.members.fetch({ user: claim.user_id, force: true })
                 await addMissingRoles(member, email, roster.role)
                 await privateReply(
                     interaction,
@@ -104,10 +104,12 @@ function createRosterCommands({
             await withMembershipLock(async () => {
                 const claim = await store.claimFor(config.guildId, email)
                 if (!claim) throw new Error(uiText('errors.noLinkedAccount'))
-                const member = await interaction.guild.members.fetch(claim.user_id).catch((error) => {
-                    if (error.code === 10007) return null
-                    throw error
-                })
+                const member = await interaction.guild.members
+                    .fetch({ user: claim.user_id, force: true })
+                    .catch((error) => {
+                        if (error.code === 10007) return null
+                        throw error
+                    })
                 await removeManagedRoles(member, claim)
                 await store.releaseClaim(config.guildId, email, interaction.user.id)
                 if (member)
@@ -126,21 +128,34 @@ function createRosterCommands({
                 const prior = await store.claimFor(config.guildId, email)
                 if (!prior) throw new Error(uiText('errors.noLinkedAccount'))
                 if (prior.user_id === target.id) throw new Error(uiText('errors.sameAccount'))
-                const targetMember = await interaction.guild.members.fetch(target.id)
-                const oldMember = await interaction.guild.members.fetch(prior.user_id).catch((error) => {
-                    if (error.code === 10007) return null
-                    throw error
-                })
                 const roster = await store.lookup(config.guildId, email)
+                if (!roster) throw new Error(uiText('errors.emailAbsent'))
+                if (await store.claimForUser(config.guildId, target.id)) throw new Error(uiText('errors.targetClaimed'))
+                const targetMember = await interaction.guild.members.fetch({ user: target.id, force: true })
+                const oldMember = await interaction.guild.members
+                    .fetch({ user: prior.user_id, force: true })
+                    .catch((error) => {
+                        if (error.code === 10007) return null
+                        throw error
+                    })
                 const oldRoles = oldMember
                     ? roleKinds.filter(
                           (kind) => prior[managedColumns[kind]] && oldMember.roles.cache.has(roleIds[kind])
                       )
                     : []
+                async function restoreOldRoles() {
+                    let failed = false
+                    for (const kind of oldRoles) {
+                        await oldMember.roles.add(roleIds[kind]).catch(() => {
+                            failed = true
+                        })
+                    }
+                    if (failed) await alertAdmins(uiText('alerts.transferFailed'))
+                }
                 try {
                     await removeManagedRoles(oldMember, prior)
                 } catch (error) {
-                    for (const kind of oldRoles) await oldMember.roles.add(roleIds[kind]).catch(() => {})
+                    await restoreOldRoles()
                     throw error
                 }
                 try {
@@ -152,7 +167,7 @@ function createRosterCommands({
                         existingRoles(targetMember)
                     )
                 } catch (error) {
-                    for (const kind of oldRoles) await oldMember.roles.add(roleIds[kind]).catch(() => {})
+                    await restoreOldRoles()
                     throw error
                 }
                 try {

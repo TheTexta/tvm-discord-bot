@@ -1,10 +1,14 @@
+# Historical implementation notes
+
+This records the initial rollout. For current behavior and operations, see [README.md](README.md) and [the operator guide](docs/operations.md).
+
 # TVM Discord email verification plan
 
 ## Goal
 
 Run a TVM-specific [EmailVerify](https://github.com/lkaesberg/EmailVerify) fork on Coolify. A member privately enters the **email address on the TVM member roster**. The bot sends a one-time code to that address and grants `General Member` after the code is accepted. Editors and producers also receive `Executives (Producers & Editors)`; admins also receive `Admin Team`. Student numbers do not participate in lookup, verification, claims, or rate limits. A domain match alone does not establish membership.
 
-The complete source of the running bot is public at [TheTexta/tvm-discord-email-verification](https://github.com/TheTexta/tvm-discord-email-verification), and the bot exposes it with `/source`. Never commit the real roster, credentials, or database. Preserve the upstream AGPL license and attribution.
+The complete source of the running bot is public at [TheTexta/tvm-discord-bot](https://github.com/TheTexta/tvm-discord-bot), and the bot exposes it with `/source`. Never commit the real roster, credentials, or database. Preserve the upstream AGPL license and attribution.
 
 ## Progress as of 2026-10-01
 

@@ -36,3 +36,40 @@ test('runtime text references exist in the config', () => {
         }
     }
 })
+
+test('editable text validates missing keys, placeholders and component limits with named errors', () => {
+    const { validateUiText } = require('../src/tvm/uiText')
+    const text = require('../ui-text.json')
+    assert.equal(validateUiText(text), text)
+    for (const [key, value, pattern] of [
+        ['commands.verify', undefined, /commands.verify/],
+        ['email.codeBody', 'Your code is {wrong}', /email.codeBody/],
+        ['email.codeBody', 'Your code is ready', /email.codeBody/],
+        ['buttons.verify', 'x'.repeat(81), /buttons.verify/],
+        ['shoot.nameLabel', 'x'.repeat(46), /shoot.nameLabel/],
+        ['shoot.setup', 'x'.repeat(101), /shoot.setup/],
+        ['shoot.joinDescription', 'x'.repeat(101), /shoot.joinDescription/]
+    ]) {
+        const candidate = structuredClone(text)
+        const [section, name] = key.split('.')
+        candidate[section][name] = value
+        assert.throws(() => validateUiText(candidate), pattern)
+    }
+})
+
+test('recovery identifiers retain the deployed format and do not depend on editable copy', () => {
+    const { shootMarker, shootTopic } = require('../src/tvm/shoot/identifiers')
+    const { renderShoot } = require('../src/tvm/shoot/render')
+    assert.equal(shootTopic('abc'), 'TVM shoot abc')
+    assert.equal(shootMarker('abc', 'brief'), 'TVM shoot abc · brief')
+    const shoot = {
+        id: 'abc',
+        name: 'A shoot',
+        location: 'Studio',
+        organizer_id: '1',
+        channel_id: '2',
+        join_period: 'never'
+    }
+    assert.equal(renderShoot(shoot, 'brief', false).embeds[0].toJSON().footer.text, 'TVM shoot abc · brief')
+    assert.equal(Object.hasOwn(require('../ui-text.json').shoot, 'marker'), false)
+})

@@ -2,6 +2,7 @@
 'use strict'
 
 const { Client, GatewayIntentBits } = require('discord.js')
+const { validateUiText } = require('./uiText')
 const { loadConfig } = require('./config')
 const { createApp } = require('./App')
 const Store = require('./Store')
@@ -10,6 +11,7 @@ const SelfSmtpProvider = require('../mail/providers/SelfSmtpProvider')
 
 async function main() {
     process.umask(0o077)
+    validateUiText()
     const config = loadConfig()
     const store = new Store(config.databasePath, config.codeSecret)
     const mail = new SelfSmtpProvider({
@@ -32,11 +34,7 @@ async function main() {
         config,
         store,
         mail,
-        client,
-        onFatal: () => {
-            process.exitCode = 1
-            void stop()
-        }
+        client
     })
     function stop() {
         return app.shutdown().catch((error) => {

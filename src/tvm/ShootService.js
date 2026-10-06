@@ -4,6 +4,7 @@
 const crypto = require('node:crypto')
 const { ChannelType, Partials, EmbedBuilder, MessageFlags, escapeMarkdown } = require('discord.js')
 const { uiText } = require('./uiText')
+const { shootMarker, shootTopic } = require('./shoot/identifiers')
 const { hasAdminTeamRole, isBotAdmin, canManageBot } = require('./permissions')
 const {
     EMOJI,
@@ -68,6 +69,7 @@ class ShootService {
             }
         }
         await this.reconcileAll({ republishAnnouncements: true })
+        if (this.stopped) return
         this.timer = setInterval(() => this.reconcileAll().catch((error) => this.report('reconcile', error)), 60000)
         this.timer.unref()
     }
@@ -208,7 +210,7 @@ class ShootService {
                 if (
                     shoot.status !== 'draft' ||
                     shoot.organizer_id !== interaction.user.id ||
-                    Date.now() - shoot.created_at > 30 * 60000
+                    Date.now() - shoot.created_at >= 30 * 60000
                 ) {
                     throw new Error(uiText('shoot.expired'))
                 }
@@ -250,7 +252,7 @@ class ShootService {
     // Durable markers recover a successful Discord send whose response/DB write was lost.
     // Scan all pages; Discord's enforceNonce alone only deduplicates recent sends.
     async recoverMessage(channel, shoot, kind) {
-        const marker = uiText('shoot.marker', { shootId: shoot.id, kind })
+        const marker = shootMarker(shoot.id, kind)
         let before
         while (true) {
             const page = await channel.messages.fetch({ limit: 100, before })
@@ -376,7 +378,7 @@ class ShootService {
                 throw new Error(uiText('shoot.missingChannel'))
             }
         } else {
-            const topic = uiText('shoot.channelTopic', { shootId: shoot.id })
+            const topic = shootTopic(shoot.id)
             const channels = await guild.channels.fetch()
             channel = [...channels.values()].find(
                 (candidate) => candidate?.type === ChannelType.GuildText && candidate.topic === topic

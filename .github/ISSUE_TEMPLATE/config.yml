@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+    - name: Report a security vulnerability privately
+      url: https://github.com/TheTexta/tvm-discord-bot/security/advisories/new
+      about: Keep credentials, member data, and vulnerability details out of public issues.

@@ -47,8 +47,9 @@
         "complete": "You're verified! Your TVM membership gives you access to {roles}. Welcome in! 🎉",
         "posting": "Posting the verification button!",
         "post": "Welcome to the TVM Discord! 🎥\n\nClick the button below to verify using the email you signed up to TVM with. We'll send you a code to enter here!\n\nOnce verified, you'll receive {memberRole} and get access to the member channels. Producers and editors also receive {execRole}, and admins also receive {adminRole}.\n\nCheck your junk folder if the email doesn't show up! If you need help, reach out to the TVM Admin Team.",
-        "source": "Check out the bot's source code: https://github.com/TheTexta/tvm-discord-email-verification",
-        "failed": "Something went wrong. Please reach out to the TVM Admin Team so they can check the bot logs and try again."
+        "source": "Check out the bot's source code: https://github.com/TheTexta/tvm-discord-bot",
+        "failed": "Something went wrong. Please reach out to the TVM Admin Team so they can check the bot logs and try again.",
+        "starting": "The TVM bot is starting up. Please try again in a moment."
     },
     "email": {
         "fromName": "TVM Verification",
@@ -168,8 +169,6 @@
         "crewInvited": "Direct invitations",
         "crewReaction": "Joined by reaction",
         "crewEmpty": "None",
-        "marker": "TVM shoot {shootId} · {kind}",
-        "channelTopic": "TVM shoot {shootId}",
         "reason": "TVM shoot workspace",
         "add": "Add a verified member to this shoot, including after reaction joining expires",
         "addUserOption": "Verified member or administrator to add to the shoot",

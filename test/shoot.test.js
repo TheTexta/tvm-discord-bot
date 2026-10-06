@@ -1348,3 +1348,22 @@ test('a closed announcement with a lost republication response is cleaned up whe
     assert.equal(channel.messages.cache.size, 0)
     assert.equal(channel.sends.length, 2)
 })
+
+test('shutdown during shoot initialization cannot install a reconciliation timer afterward', async (t) => {
+    const f = await fixture(t)
+    let release
+    const waiting = new Promise((resolve) => {
+        release = resolve
+    })
+    const original = f.store.allShoots.bind(f.store)
+    f.store.allShoots = async (...args) => {
+        await waiting
+        return original(...args)
+    }
+    const initialization = f.service.initialize()
+    await new Promise((resolve) => setImmediate(resolve))
+    f.service.stop()
+    release()
+    await initialization
+    assert.equal(f.service.timer, undefined)
+})

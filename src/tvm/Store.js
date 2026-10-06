@@ -389,6 +389,11 @@ class Store {
                 ))
         )
     }
+    claimForUser(guildId, userId) {
+        return this._locked(() =>
+            this._get('SELECT email FROM email_claims WHERE guild_id = ? AND user_id = ?', [guildId, userId])
+        )
+    }
     claimFor(guildId, email) {
         return this._locked(() =>
             this._get(
@@ -500,6 +505,15 @@ class Store {
             await this._run('DELETE FROM email_request_events WHERE at < ?', [now - 3600000])
             await this._run('DELETE FROM email_send_events WHERE at < ?', [now - 86400000])
             await this._run('DELETE FROM email_admin_audit WHERE at < ?', [now - 365 * 86400000])
+            await this._transaction(async () => {
+                const cutoff = now - 30 * 60000
+                await this._run(
+                    `DELETE FROM shoot_participants WHERE shoot_id IN
+                    (SELECT id FROM shoots WHERE status = 'draft' AND created_at <= ?)`,
+                    [cutoff]
+                )
+                await this._run("DELETE FROM shoots WHERE status = 'draft' AND created_at <= ?", [cutoff])
+            })
         })
     }
     createShootDraft(id, guildId, organizerId, invitedIds) {

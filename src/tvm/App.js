@@ -10,7 +10,7 @@ const {
     ButtonStyle,
     MessageFlags
 } = require('discord.js')
-const { uiText } = require('./uiText')
+const { uiText, validateUiText } = require('./uiText')
 const { canManageBot } = require('./permissions')
 const UnverifiedRoleManager = require('./UnverifiedRoleManager')
 const { ShootService } = require('./ShootService')
@@ -20,7 +20,8 @@ const { createVerificationService } = require('./VerificationService')
 const { createRosterCommands } = require('./RosterCommands')
 const { roleKinds, configuredRoleIds } = require('./roles')
 const { normalizeEmail, validEmail } = require('./validation')
-const { emailModal, codeModal } = require('./verificationUi')
+const { modal: shootModal } = require('./shoot/forms')
+const { emailModal, codeModal, codeRow } = require('./verificationUi')
 
 function createApp({
     config,
@@ -35,6 +36,26 @@ function createApp({
     shutdownTimeoutMs = 25000
 }) {
     if (!config || !store || !mail || !client) throw new Error('Application dependencies are required')
+    validateUiText()
+    // Build all interactive components now, including optional shoots, before connecting.
+    emailModal().toJSON()
+    codeModal().toJSON()
+    codeRow().toJSON()
+    buildCommands(true)
+    shootModal({ id: 'validation', revision: 0, name: '', location: '', call_time: null, join_period: 'day' }).toJSON()
+    shootModal(
+        { id: 'validation', revision: 0, name: 'Shoot', location: 'Studio', call_time: null, join_period: 'day' },
+        true
+    ).toJSON()
+    let state = 'starting'
+    let resolveReady, rejectReady
+    const readiness = new Promise((resolve, reject) => {
+        resolveReady = resolve
+        rejectReady = reject
+    })
+    // Shutdown or an initialization event can precede start().
+    readiness.catch(() => {})
+    let startPromise
     let stopping = false
     let shutdownPromise
     let membershipTimer
@@ -111,16 +132,21 @@ function createApp({
         async () => {
             try {
                 await store.ready
+                if (stopping) return
+                await store.sweep()
+                if (stopping) return
                 rest ||= new REST({ version: '10' }).setToken(config.token)
-                await rest.put(Routes.applicationGuildCommands(config.applicationId, config.guildId), {
-                    body: commands
-                })
-                logger.log('[TVM] Bot ready; guild commands registered')
                 const guild = await client.guilds.fetch(config.guildId)
                 const roles = await Promise.all(roleKinds.map((kind) => guild.roles.fetch(roleIds[kind])))
                 const botMember = await guild.members.fetchMe()
                 if (
-                    roles.some((role) => !role || botMember.roles.highest.position <= role.position) ||
+                    roles.some(
+                        (role) =>
+                            !role ||
+                            role.id === guild.id ||
+                            role.managed ||
+                            botMember.roles.highest.position <= role.position
+                    ) ||
                     !botMember.permissions.has(PermissionFlagsBits.ManageRoles)
                 ) {
                     throw new Error('Bot cannot manage all configured roles; check its permissions and role position')
@@ -135,15 +161,25 @@ function createApp({
                 ) {
                     throw new Error('Bot cannot send to its private administrator alert channel')
                 }
+                if (stopping) return
                 const unverifiedRole = await unverifiedRoles.initialize(guild)
+                if (stopping) return
                 unverifiedReady = true
                 const result = await withMembershipLock(() => reconcile(guild))
+                if (stopping) return
                 await shoots.initialize()
                 logger.log(
                     `[TVM] Unverified role ${unverifiedRole.id}: added ${result.unverified.added}, removed ${result.unverified.removed}, failed ${result.unverified.failed}`
                 )
                 if (result.revoked) logger.log(`[TVM] Reconciled ${result.revoked} removed claims`)
                 if (stopping) return
+                await rest.put(Routes.applicationGuildCommands(config.applicationId, config.guildId), {
+                    body: commands
+                })
+                if (stopping) return
+                state = 'ready'
+                resolveReady()
+                logger.log('[TVM] Bot ready; guild commands registered')
                 membershipTimer = setInterval(() => {
                     if (stopping) return
                     track(() => store.sweep()).catch((error) =>
@@ -154,6 +190,8 @@ function createApp({
                     )
                 }, 3600000).unref()
             } catch (error) {
+                rejectReady(error)
+                if (stopping) return
                 logger.error('[TVM] Startup failed:', error?.message || error)
                 await alertAdmins(uiText('alerts.startupFailed'))
                 onFatal(error)
@@ -163,7 +201,7 @@ function createApp({
     )
 
     async function syncUnverifiedMember(member) {
-        if (!unverifiedReady || member.guild.id !== config.guildId) return
+        if (state !== 'ready' || !unverifiedReady || member.guild.id !== config.guildId) return
         try {
             await withMembershipLock(() => unverifiedRoles.syncMember(member))
         } catch (error) {
@@ -174,18 +212,32 @@ function createApp({
 
     listen('guildMemberAdd', syncUnverifiedMember)
     listen('guildMemberUpdate', (_oldMember, member) => syncUnverifiedMember(member))
-    listen('messageReactionAdd', (reaction, user) => shoots.onReaction(reaction, user))
-    listen('messageReactionRemove', (reaction, user) => shoots.onReaction(reaction, user))
-    listen('messageReactionRemoveAll', (message) => shoots.onReactionClear(message))
-    listen('messageReactionRemoveEmoji', (reaction) => shoots.onReactionClear(reaction.message, reaction.emoji))
-    listen('shardResume', () => shoots.reconcileAll().catch((error) => shoots.report('resume', error)))
+    listen('messageReactionAdd', (reaction, user) => state === 'ready' && shoots.onReaction(reaction, user))
+    listen('messageReactionRemove', (reaction, user) => state === 'ready' && shoots.onReaction(reaction, user))
+    listen('messageReactionRemoveAll', (message) => state === 'ready' && shoots.onReactionClear(message))
+    listen(
+        'messageReactionRemoveEmoji',
+        (reaction) => state === 'ready' && shoots.onReactionClear(reaction.message, reaction.emoji)
+    )
+    listen(
+        'shardResume',
+        () => state === 'ready' && shoots.reconcileAll().catch((error) => shoots.report('resume', error))
+    )
     listen('shardReady', () => {
-        if (shoots.timer) shoots.reconcileAll().catch((error) => shoots.report('reconnect', error))
+        if (state === 'ready' && shoots.timer) shoots.reconcileAll().catch((error) => shoots.report('reconnect', error))
     })
 
     listen('interactionCreate', async (interaction) => {
         if (interaction.guildId !== config.guildId) return
         try {
+            if (interaction.isChatInputCommand() && interaction.commandName === 'source') {
+                await interaction.reply({ content: uiText('verification.source'), flags: MessageFlags.Ephemeral })
+                return
+            }
+            if (state !== 'ready') {
+                await interaction.reply({ content: uiText('verification.starting'), flags: MessageFlags.Ephemeral })
+                return
+            }
             if (await shoots.handleInteraction(interaction)) return
             if (interaction.isButton()) {
                 if (interaction.customId === 'tvm:verify') return await interaction.showModal(emailModal())
@@ -199,10 +251,6 @@ function createApp({
             }
             if (!interaction.isChatInputCommand()) return
             if (interaction.commandName === 'verify') return await interaction.showModal(emailModal())
-            if (interaction.commandName === 'source') {
-                await interaction.reply({ content: uiText('verification.source'), flags: MessageFlags.Ephemeral })
-                return
-            }
             if (!canManageBot(interaction, config.adminRoleId)) {
                 await interaction.reply({ content: uiText('admin.permissionRequired'), flags: MessageFlags.Ephemeral })
                 return
@@ -261,12 +309,18 @@ function createApp({
 
     function start() {
         if (stopping) return Promise.reject(new Error('Application is stopping'))
-        return track(() => client.login(config.token))
+        startPromise ||= track(async () => {
+            await client.login(config.token)
+            await readiness
+        })
+        return startPromise
     }
 
     function shutdown() {
         if (shutdownPromise) return shutdownPromise
         stopping = true
+        state = 'stopping'
+        rejectReady(new Error('Application is stopping'))
         clearInterval(membershipTimer)
         shoots.stop()
         for (const [event, listener] of listeners) client.off(event, listener)

@@ -38,6 +38,8 @@ function loadConfig(env = process.env) {
     }
     if (new Set([config.memberRoleId, config.execRoleId, config.adminRoleId]).size !== 3)
         throw new Error('Configured role IDs must be distinct')
+    if ([config.memberRoleId, config.execRoleId, config.adminRoleId].includes(config.guildId))
+        throw new Error('Membership role IDs cannot reference @everyone')
     if (
         config.unverifiedRoleId &&
         (!validSnowflake(config.unverifiedRoleId) ||
@@ -57,7 +59,7 @@ function loadRosterConfig(env = process.env) {
     const codeSecret = required(env, 'VERIFICATION_CODE_SECRET')
     if (!validSnowflake(guildId)) throw new Error('Invalid guildId')
     if (codeSecret.length < 32) throw new Error('VERIFICATION_CODE_SECRET must contain at least 32 characters')
-    return { guildId, codeSecret, databasePath: env.TVM_DATABASE_PATH?.trim() || '/usr/app/config/tvm.db' }
+    return { guildId, codeSecret, databasePath: env.TVM_DATABASE_PATH?.trim() || './config/tvm.db' }
 }
 
 module.exports = { loadConfig, loadShootConfig, loadRosterConfig }

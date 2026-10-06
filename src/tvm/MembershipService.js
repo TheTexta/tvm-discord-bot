@@ -41,7 +41,7 @@ function createMembershipService({ config, store, unverifiedRoles, alertAdmins, 
         let failed = 0
         for (const claim of removed) {
             try {
-                const member = await guild.members.fetch(claim.user_id).catch((error) => {
+                const member = await guild.members.fetch({ user: claim.user_id, force: true }).catch((error) => {
                     if (error.code === 10007) return null
                     throw error
                 })
@@ -55,7 +55,7 @@ function createMembershipService({ config, store, unverifiedRoles, alertAdmins, 
         const active = await store.activeClaims(config.guildId)
         for (const claim of active) {
             try {
-                const member = await guild.members.fetch(claim.user_id).catch((error) => {
+                const member = await guild.members.fetch({ user: claim.user_id, force: true }).catch((error) => {
                     if (error.code === 10007) return null
                     throw error
                 })

@@ -85,7 +85,7 @@ function createVerificationService({
             return
         }
         await withMembershipLock(async () => {
-            const member = await interaction.guild.members.fetch(interaction.user.id)
+            const member = await interaction.guild.members.fetch({ user: interaction.user.id, force: true })
             const result = await store.verifyAndClaim(config.guildId, interaction.user.id, code, existingRoles(member))
             if (!result.ok) {
                 const message =
