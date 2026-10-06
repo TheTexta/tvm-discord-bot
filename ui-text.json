@@ -46,7 +46,7 @@
     "roleFailed": "Your code was accepted, but we couldn't confirm your Discord roles. Reach out to the TVM Admin Team to get this sorted.",
     "complete": "You're verified! Your TVM membership gives you access to {roles}. Welcome in! 🎉",
     "posting": "Posting the verification button!",
-    "post": "Welcome to the TVM Discord! 🎥\n\nClick the button below to verify using the email you signed up to TVM with. We'll send you a code to enter here!\n\nOnce verified, you'll receive {memberRole} and get access to the member channels. Producers and editors also receive {execRole}, and admins also receive {adminRole}.\n\nCheck your junk folder if the email doesn't show up! If you need help, reach out to the TVM Admin Team.\n\nBot source code: https://github.com/TheTexta/tvm-discord-email-verification",
+    "post": "Welcome to the TVM Discord! 🎥\n\nClick the button below to verify using the email you signed up to TVM with. We'll send you a code to enter here!\n\nOnce verified, you'll receive {memberRole} and get access to the member channels. Producers and editors also receive {execRole}, and admins also receive {adminRole}.\n\nCheck your junk folder if the email doesn't show up! If you need help, reach out to the TVM Admin Team.",
     "source": "Check out the bot's source code: https://github.com/TheTexta/tvm-discord-email-verification",
     "failed": "Something went wrong. Please reach out to the TVM Admin Team so they can check the bot logs and try again."
   },
