@@ -9,6 +9,7 @@ const {
     LabelBuilder, StringSelectMenuBuilder, EmbedBuilder, MessageFlags, escapeMarkdown
 } = require('discord.js')
 const { uiText } = require('./uiText')
+const { hasAdminTeamRole, isBotAdmin, canManageBot } = require('./permissions')
 
 const EMOJI = '🎬'
 const ZONE = 'America/Toronto'
@@ -68,7 +69,9 @@ function joiningAllowed(shoot, now = Date.now()) {
 
 function shootCommand() {
     return new SlashCommandBuilder().setName('shoot').setDescription(uiText('shoot.command'))
-        .setDefaultMemberPermissions(P.Administrator)
+        // Authorization is checked for every command and modal. Administrator-only
+        // defaults would hide the command from members with the Admin Team role.
+        .setDefaultMemberPermissions(null)
         .addSubcommand(s => s.setName('setup').setDescription(uiText('shoot.setup'))
             .addStringOption(o => o.setName('members').setDescription(uiText('shoot.membersOption')).setMaxLength(1700)))
         .addSubcommand(s => s.setName('edit').setDescription(uiText('shoot.edit')))
@@ -100,14 +103,15 @@ function modal(shoot, edit = false) {
             .setStringSelectMenuComponent(select))
 }
 
-function overwrites(guildId, botId, participantIds, closed) {
+function overwrites(guildId, botId, participantIds, closed, adminRoleId, adminParticipantIds = new Set()) {
     const everyoneDeny = [...WRITE, ...THREADS, P.ViewChannel]
     return [
         { id: guildId, type: 0, allow: [], deny: everyoneDeny },
         { id: botId, type: 1, allow: BOT_PERMISSIONS, deny: [] },
+        ...(adminRoleId ? [{ id: adminRoleId, type: 0, allow: [...READ, ...WRITE, P.AttachFiles, P.EmbedLinks, P.UseApplicationCommands], deny: THREADS }] : []),
         ...[...new Set(participantIds)].filter(id => id !== botId).map(id => ({
-            id, type: 1, allow: closed ? READ : [...READ, ...WRITE, P.AttachFiles, P.EmbedLinks],
-            deny: closed ? [...WRITE, ...THREADS] : THREADS
+            id, type: 1, allow: closed && !adminParticipantIds.has(id) ? READ : [...READ, ...WRITE, P.AttachFiles, P.EmbedLinks],
+            deny: closed && !adminParticipantIds.has(id) ? [...WRITE, ...THREADS] : THREADS
         }))
     ]
 }
@@ -177,7 +181,8 @@ class ShootService {
             throw error
         })
         return Boolean(member && !member.user.bot &&
-            (member.permissions.has(P.Administrator) || await this.store.isAuthorizedUser(guild.id, userId)))
+            (isBotAdmin(member, this.config.adminRoleId) ||
+                await this.store.isAuthorizedUser(guild.id, userId)))
     }
 
     async handleInteraction(interaction) {
@@ -187,7 +192,7 @@ class ShootService {
         if (interaction.guildId !== this.config.guildId) return true
         try {
             // Do not trust command defaults or a previously authorized form.
-            if (!interaction.memberPermissions?.has(P.Administrator)) {
+            if (!canManageBot(interaction, this.config.adminRoleId)) {
                 await interaction.reply({ content: uiText('shoot.permission'), flags: MessageFlags.Ephemeral })
                 return true
             }
@@ -275,7 +280,9 @@ class ShootService {
                     throw new Error(uiText('shoot.expired'))
                 }
                 for (const row of await this.store.shootParticipants(id)) {
-                    if (!await this.eligible(interaction.guild, row.user_id)) throw new Error(uiText('shoot.ineligible', { userId: row.user_id }))
+                    if (!await this.eligible(interaction.guild, row.user_id)) {
+                        throw new Error(uiText('shoot.ineligible', { userId: row.user_id }))
+                    }
                 }
                 await this.store.updateShoot(id, { ...details, status: 'provisioning' })
             } else if (action === 'edit') {
@@ -376,7 +383,20 @@ class ShootService {
         const guild = await this.client.guilds.fetch(this.config.guildId)
         const closed = ['closing', 'closed'].includes(shoot.status)
         const participantIds = await this.participantIds(shoot, guild)
-        const permissions = overwrites(guild.id, this.client.user.id, participantIds, closed)
+        // Member overwrites take precedence over role overwrites. Keep Admin Team
+        // participants able to run management commands in archived chats too.
+        const adminParticipantIds = new Set()
+        if (closed) {
+            for (const userId of participantIds) {
+                const member = await guild.members.fetch({ user: userId, force: true }).catch(error => {
+                    if (error.code === 10007) return null
+                    throw error
+                })
+                if (hasAdminTeamRole(member, this.config.adminRoleId)) adminParticipantIds.add(userId)
+            }
+        }
+        const permissions = overwrites(guild.id, this.client.user.id, participantIds, closed,
+            this.config.adminRoleId, adminParticipantIds)
         let channel
         if (shoot.channel_id) {
             channel = await guild.channels.fetch(shoot.channel_id, { force: true }).catch(error => {

@@ -15,7 +15,7 @@ const IDS = {
     guild: '100000000000000001', bot: '100000000000000002', admin: '100000000000000003',
     invited: '100000000000000004', joined: '100000000000000005', outsider: '100000000000000006',
     announce: '100000000000000007', active: '100000000000000008', archive: '100000000000000009',
-    other: '100000000000000010', extra: '100000000000000011'
+    other: '100000000000000010', extra: '100000000000000011', adminRole: '100000000000000012'
 }
 const fields = (name = 'TVM film', value = '2026-10-15 13:30', location = 'Studio', period = 'day') => {
     const [date = '', time = ''] = value.split(' ')
@@ -46,7 +46,7 @@ async function fixture(t) {
     for (const [name, id] of Object.entries(IDS)) {
         if (!['bot', 'admin', 'invited', 'joined', 'outsider', 'extra'].includes(name)) continue
         const user = { id, bot: name === 'bot', send: async payload => { notices.push({ id, payload }) } }
-        const member = { id, user, permissions: new PermissionsBitField(name === 'admin' || name === 'bot' ? P.Administrator : 0n) }
+        const member = { id, user, roles: { cache: new Collection() }, permissions: new PermissionsBitField(name === 'admin' || name === 'bot' ? P.Administrator : 0n) }
         members.set(id, member)
     }
     function channel(id, type = ChannelType.GuildText, options = {}) {
@@ -150,13 +150,13 @@ async function fixture(t) {
         }
     }
     const client = { user: members.get(IDS.bot).user, guilds: { fetch: async () => guild } }
-    const config = { guildId: IDS.guild, shoots: { announcementChannelId: IDS.announce, categoryId: IDS.active, archiveCategoryId: IDS.archive } }
+    const config = { guildId: IDS.guild, adminRoleId: IDS.adminRole, shoots: { announcementChannelId: IDS.announce, categoryId: IDS.active, archiveCategoryId: IDS.archive } }
     const service = new ShootService({ client, store, config, alertAdmins: async message => errors.push(message) })
     service.report = async (id, error) => { errors.push({ id, error: error.message }) }
     function interaction({ command = null, customId = null, channelId = IDS.other, userId = IDS.admin, mentions = '', addUserId = IDS.extra } = {}) {
         return {
             guild, guildId: IDS.guild, channelId, channel: channels.get(channelId), user: members.get(userId).user,
-            memberPermissions: members.get(userId).permissions,
+            memberPermissions: members.get(userId).permissions, member: members.get(userId),
             commandName: command ? 'shoot' : null, customId,
             options: { getSubcommand: () => command, getString: () => mentions, getUser: () => members.get(addUserId).user }, fields: fields(),
             isChatInputCommand: () => Boolean(command), isModalSubmit: () => Boolean(customId),
@@ -211,7 +211,7 @@ test('shoot configuration is optional, complete, distinct, and validates snowfla
     assert.throws(() => loadShootConfig({ ...env, TVM_SHOOT_ARCHIVE_CATEGORY_ID: IDS.active }))
     assert.throws(() => loadShootConfig({ ...env, TVM_SHOOT_CATEGORY_ID: 'bad' }))
     const command = shootCommand()
-    assert.equal(command.default_member_permissions, String(P.Administrator))
+    assert.equal(command.default_member_permissions, null)
     assert.deepEqual(command.options.map(option => option.name), ['setup', 'edit', 'crew', 'add', 'close', 'reopen'])
 })
 
@@ -562,7 +562,7 @@ test('participant capacity rejects excess joins without breaking existing access
     }
     await f.service.reconcileAll()
     const chat = f.channels.get(shoot.channel_id)
-    assert.equal(chat.permissionOverwrites.cache.size, 100) // 98 participants, bot, @everyone.
+    assert.equal(chat.permissionOverwrites.cache.size, 101) // 98 participants, bot, @everyone, Admin Team.
     await f.react(shoot, 'joined')
     assert.equal(reaction.normal.has(IDS.joined), false)
     assert.equal(chat.permissionOverwrites.cache.has(IDS.joined), false)
@@ -715,4 +715,116 @@ test('forms from the previous deployment ask admins to reopen instead of partial
         if (key === 'date') throw new Error('Unknown field')
         return { name: 'Film', time: '2026-10-15 13:30', location: 'Studio' }[key]
     } }), /expired/)
+})
+
+test('Admin Team can use every shoot control without Administrator or a roster claim', async t => {
+    const f = await fixture(t)
+    const organizer = f.members.get(IDS.outsider)
+    organizer.roles.cache.set(IDS.adminRole, { id: IDS.adminRole, name: 'Admin Team' })
+    assert.equal(organizer.permissions.has(P.Administrator), false)
+    assert.equal(await f.store.isAuthorizedUser(IDS.guild, organizer.id), false)
+    const setup = f.interaction({ command: 'setup', userId: organizer.id })
+    await f.service.handleInteraction(setup)
+    assert.ok(setup.modal)
+    const submit = f.interaction({ customId: setup.modal.custom_id, userId: organizer.id })
+    await f.service.handleInteraction(submit)
+    let shoot = await f.store.getShoot(setup.modal.custom_id.split(':')[3], IDS.guild)
+    assert.equal(shoot.status, 'open')
+    assert.equal(shoot.organizer_id, organizer.id)
+    const chat = f.channels.get(shoot.channel_id)
+    assert.ok(allows(chat, organizer.id, P.SendMessages))
+    assert.ok(allows(chat, IDS.adminRole, P.ViewChannel))
+    assert.ok(allows(chat, IDS.adminRole, P.UseApplicationCommands))
+    const edit = f.interaction({ command: 'edit', channelId: shoot.channel_id, userId: organizer.id })
+    await f.service.handleInteraction(edit)
+    const editSubmit = f.interaction({ customId: edit.modal.custom_id, channelId: shoot.channel_id, userId: organizer.id })
+    editSubmit.fields = fields('Updated shoot')
+    await f.service.handleInteraction(editSubmit)
+    assert.equal((await f.store.getShoot(shoot.id, IDS.guild)).name, 'Updated shoot')
+    for (const command of ['crew', 'add', 'close']) {
+        const control = f.interaction({ command, channelId: shoot.channel_id, userId: organizer.id })
+        await f.service.handleInteraction(control)
+        assert.equal(control.deferred, true)
+    }
+    shoot = await f.store.getShoot(shoot.id, IDS.guild)
+    assert.equal(shoot.status, 'closed')
+    assert.ok(allows(chat, organizer.id, P.SendMessages))
+    assert.ok(allows(chat, IDS.adminRole, P.SendMessages))
+    assert.equal(allows(chat, IDS.extra, P.SendMessages), false)
+    const reopen = f.interaction({ command: 'reopen', channelId: shoot.channel_id, userId: organizer.id })
+    await f.service.handleInteraction(reopen)
+    assert.equal((await f.store.getShoot(shoot.id, IDS.guild)).status, 'open')
+    assert.equal(f.errors.length, 0)
+})
+
+test('Admin Team can manage another organizer’s archived shoot and lose authority when the role is removed', async t => {
+    const f = await fixture(t)
+    const { shoot } = await f.create()
+    const admin = f.members.get(IDS.outsider)
+    admin.roles.cache.set(IDS.adminRole, { id: IDS.adminRole })
+    await f.react(shoot, 'outsider')
+    await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id, userId: admin.id }))
+    const chat = f.channels.get(shoot.channel_id)
+    assert.ok(allows(chat, admin.id, P.SendMessages))
+    const edit = f.interaction({ command: 'edit', channelId: shoot.channel_id, userId: admin.id })
+    await f.service.handleInteraction(edit)
+    assert.ok(edit.modal)
+    admin.roles.cache.delete(IDS.adminRole)
+    const submit = f.interaction({ customId: edit.modal.custom_id, channelId: shoot.channel_id, userId: admin.id })
+    await f.service.handleInteraction(submit)
+    assert.match(submit.replies.at(-1).content, /Admin Team role/)
+    await f.service.reconcileAll()
+    assert.equal(chat.permissionOverwrites.cache.has(admin.id), false)
+    assert.equal((await f.store.getShoot(shoot.id, IDS.guild)).status, 'closed')
+})
+
+test('removing Admin Team after opening setup prevents submitting the form', async t => {
+    const f = await fixture(t)
+    const organizer = f.members.get(IDS.extra)
+    organizer.roles.cache.set(IDS.adminRole, { id: IDS.adminRole })
+    const setup = f.interaction({ command: 'setup', userId: organizer.id })
+    await f.service.handleInteraction(setup)
+    assert.ok(setup.modal)
+    organizer.roles.cache.delete(IDS.adminRole)
+    const submit = f.interaction({ customId: setup.modal.custom_id, userId: organizer.id })
+    await f.service.handleInteraction(submit)
+    assert.match(submit.replies.at(-1).content, /Admin Team role/)
+    const shoot = await f.store.getShoot(setup.modal.custom_id.split(':')[3], IDS.guild)
+    assert.equal(shoot.status, 'draft')
+    assert.equal(shoot.channel_id, null)
+})
+
+test('setup checks the configured role ID and supports raw interaction member roles', async t => {
+    const f = await fixture(t)
+    const organizer = f.members.get(IDS.extra)
+    organizer.roles.cache.set('100000000000000099', { id: '100000000000000099', name: 'Admin Team' })
+    const denied = f.interaction({ command: 'setup', userId: organizer.id })
+    await f.service.handleInteraction(denied)
+    assert.equal(denied.modal, undefined)
+    const allowed = f.interaction({ command: 'setup', userId: organizer.id })
+    allowed.member = { roles: [IDS.adminRole] }
+    await f.service.handleInteraction(allowed)
+    assert.ok(allowed.modal)
+    const wrongGuild = f.interaction({ command: 'setup', userId: organizer.id })
+    wrongGuild.member = { roles: [IDS.adminRole] }
+    wrongGuild.guildId = '100000000000000098'
+    await f.service.handleInteraction(wrongGuild)
+    assert.equal(wrongGuild.modal, undefined)
+    assert.equal(wrongGuild.replies.length, 0)
+})
+
+
+test('removing Admin Team from a verified archived participant restores read-only access', async t => {
+    const f = await fixture(t)
+    const { shoot } = await f.create()
+    const participant = f.members.get(IDS.invited)
+    participant.roles.cache.set(IDS.adminRole, { id: IDS.adminRole })
+    await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id }))
+    const chat = f.channels.get(shoot.channel_id)
+    assert.ok(allows(chat, participant.id, P.SendMessages))
+    participant.roles.cache.delete(IDS.adminRole)
+    await f.service.reconcileAll()
+    assert.ok(allows(chat, participant.id, P.ViewChannel))
+    assert.equal(allows(chat, participant.id, P.SendMessages), false)
+    assert.ok(chat.permissionOverwrites.cache.get(participant.id).deny.has(P.SendMessages))
 })

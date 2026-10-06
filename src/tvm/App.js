@@ -9,6 +9,7 @@ const {
 } = require('discord.js')
 const { loadConfig } = require('./config')
 const { uiText } = require('./uiText')
+const { canManageBot } = require('./permissions')
 const { parseRoster } = require('./roster')
 const Store = require('./Store')
 const UnverifiedRoleManager = require('./UnverifiedRoleManager')
@@ -53,15 +54,15 @@ const commands = [
     new SlashCommandBuilder().setName('verify').setDescription(uiText('commands.verify')),
     new SlashCommandBuilder().setName('source').setDescription(uiText('commands.source')),
     new SlashCommandBuilder().setName('postverify').setDescription(uiText('commands.postverify'))
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+        .setDefaultMemberPermissions(null),
     new SlashCommandBuilder().setName('testmail').setDescription(uiText('commands.testmail'))
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setDefaultMemberPermissions(null)
         .addStringOption(o => o.setName('email').setDescription(uiText('commands.destinationEmail')).setRequired(true)),
     new SlashCommandBuilder().setName('upload').setDescription(uiText('commands.upload'))
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setDefaultMemberPermissions(null)
         .addAttachmentOption(o => o.setName('csv').setDescription(uiText('commands.csv')).setRequired(true)),
     new SlashCommandBuilder().setName('roster').setDescription(uiText('commands.roster'))
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setDefaultMemberPermissions(null)
         .addSubcommand(s => s.setName('status').setDescription(uiText('commands.status')))
         .addSubcommand(s => s.setName('audit').setDescription(uiText('commands.audit')))
         .addSubcommand(s => s.setName('reconcile').setDescription(uiText('commands.reconcile')))
@@ -439,7 +440,7 @@ client.on('interactionCreate', async interaction => {
             await interaction.reply({ content: uiText('verification.source'), flags: MessageFlags.Ephemeral })
             return
         }
-        if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+        if (!canManageBot(interaction, config.adminRoleId)) {
             await interaction.reply({ content: uiText('admin.permissionRequired'), flags: MessageFlags.Ephemeral })
             return
         }

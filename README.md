@@ -25,6 +25,8 @@ Discord limits: command descriptions 100 characters, button labels 80, modal tit
 
 ## Admin commands
 
+The configured Admin Team role (`TVM_ADMIN_ROLE_ID`) and Discord Administrator permission grant equal access to all bot management commands.
+
 | Command | Purpose |
 | --- | --- |
 | `/testmail` | Check delivery to a controlled inbox, including junk. |
@@ -61,7 +63,7 @@ Leave all three unset to keep shoots disabled. Partial configuration is rejected
 
 Give the bot View Channels, Read Message History, Send Messages, Embed Links, Add Reactions, and Manage Messages in the invitation channel. In both categories it needs View Channels, Read Message History, Send Messages, Send Messages in Threads, Add Reactions, Embed Links, Attach Files, Manage Channels, Manage Permissions (Manage Roles), and **Pin Messages**. Run `npm run discord:check` and restart/redeploy to register `/shoot`. No new privileged intent or Message Content Intent is needed.
 
-All shoot commands require Discord's **Administrator** permission, including form submissions. The `Admin Team` role alone is not sufficient unless it grants that permission.
+All TVM management commands and shoot form submissions allow the configured **Admin Team** role (`TVM_ADMIN_ROLE_ID`) or Discord **Administrator** permission. This includes shoot setup/edit/crew/add/close/reopen, roster upload and all roster operations, posting verification, and test mail. Role membership is checked by ID, not display name, on every interaction. Command defaults allow role-based access; the bot rejects unauthorized users privately. The shoot creator becomes the organizer and retains access.
 
 | Command | Purpose |
 | --- | --- |
@@ -76,9 +78,9 @@ The setup/edit form has separate optional date (`YYYY-MM-DD`) and time (`HH:mm`)
 
 The reaction joining dropdown offers **1 day** (default), **2 days**, **Week** (7 days), **Month** (30 days), and **Never**. The window starts when the shared invitation is first published and is independent of the call time. After expiry, the shoot stays open and existing members keep access; new members require an admin to use `/shoot add user`. Members can still remove their reaction to leave. Joining is blocked at the deadline; the invitation displays its expired state on the next synchronization (within about a minute). Changing the period through `/shoot edit` recalculates the deadline from the original publication time. Reopening or recreating the invitation does not reset it. Existing shoots created before this feature keep unlimited joining until an admin edits their window.
 
-Directly invited members join immediately. Initial invitations cannot be removed through the bot; admins can add further direct invitations with `/shoot add user`. The setup admin is the organizer and retains access. Other verified members react **🎬** on the shared invitation to join, and remove it to leave. Reacting is membership in the chat, not attendance confirmation. Bots cannot join. Eligibility uses an active roster-linked verification or Discord Administrator permission, not membership role names. It is rechecked during synchronization; an account that becomes ineligible loses participant access. The organizer retains access.
+Directly invited members join immediately. Initial invitations cannot be removed through the bot; admins can add further direct invitations with `/shoot add user`. The setup admin is the organizer and retains access. Other verified members react **🎬** on the shared invitation to join, and remove it to leave. Reacting is membership in the chat, not attendance confirmation. Bots cannot join. Eligibility uses an active roster-linked verification, the configured Admin Team role, or Discord Administrator permission. It is rechecked during synchronization; an account that becomes ineligible loses participant access. The organizer retains access.
 
-TVM uses explicit channel overwrites: other members cannot see shoot chats, and category permissions are not copied. Archived chats are read-only for participants; Discord administrators can still post because Administrator bypasses overwrites. Shoot chats do not permit participant-created threads. There is a conservative maximum of 98 participants, including the organizer.
+TVM uses explicit channel overwrites: participants, the bot, Admin Team, and Discord administrators can see shoot chats; category permissions are not copied. Admin Team can manage every active and archived shoot. Archived chats are read-only for ordinary participants; Admin Team retains posting and command access, and Discord administrators bypass overwrites. Shoot chats do not permit participant-created threads. There is a conservative maximum of 98 participants, including the organizer.
 
 Shoot state survives restarts in `tvm.db`. The bot reconciles reaction changes on startup, reconnect, and every minute, and retries interrupted creation or synchronization. Recovery markers in channel topics and message footers identify resources whose Discord response was lost; keep those markers intact. Deleted briefs/invitations are recreated without repeat invitation notifications. A deleted shoot channel is marked missing and reported to admins; it is not automatically recreated. Recovery errors appear in the existing admin alert channel and bot logs.
 
