@@ -66,14 +66,17 @@ All shoot commands require Discord's **Administrator** permission, including for
 | Command | Purpose |
 | --- | --- |
 | `/shoot setup [members]` | Run in any server text channel. Optionally @mention up to 70 members, then enter the shoot name, Toronto call time, and location. Creates a new private chat and shared invitation. |
-| `/shoot edit` | Update the details from inside the shoot chat; updates the pinned brief and invitation. |
+| `/shoot edit` | Update the details and joining window; updates the pinned brief and invitation. |
 | `/shoot crew` | Privately show directly invited and reaction-joined participants. |
+| `/shoot add user` | Add an eligible member to an open shoot, including after reaction joining expires. |
 | `/shoot close` | Move the chat to the archive category, preserve participant reading access, and disable posting and new joins. |
 | `/shoot reopen` | Return the chat to the active category and restore eligible members' access. |
 
-Call times use `YYYY-MM-DD HH:mm` in `America/Toronto`; Discord displays them in each viewer's local timezone. Invalid dates, daylight-saving gaps, and repeated daylight-saving times are rejected. Setup forms expire after 30 minutes; stale edit forms must be reopened.
+The setup/edit form has separate optional date (`YYYY-MM-DD`) and time (`HH:mm`) fields in `America/Toronto`. A date with a blank time uses **12:00 pm (noon)**. A blank date makes the shoot **Unscheduled**; the time is ignored. Discord displays scheduled call times in each viewer's local timezone. Invalid dates, daylight-saving gaps, and repeated daylight-saving times are rejected. Setup forms expire after 30 minutes; stale edit forms must be reopened.
 
-Directly invited members join immediately and their invitations cannot be edited in this release. The setup admin is the organizer and retains access. Other verified members react **🎬** on the shared invitation to join, and remove it to leave. Reacting is membership in the chat, not attendance confirmation. Bots cannot join. Eligibility uses an active roster-linked verification or Discord Administrator permission, not membership role names. It is rechecked during synchronization; an account that becomes ineligible loses participant access. The organizer retains access.
+The reaction joining dropdown offers **1 day** (default), **2 days**, **Week** (7 days), **Month** (30 days), and **Never**. The window starts when the shared invitation is first published and is independent of the call time. After expiry, the shoot stays open and existing members keep access; new members require an admin to use `/shoot add user`. Members can still remove their reaction to leave. Joining is blocked at the deadline; the invitation displays its expired state on the next synchronization (within about a minute). Changing the period through `/shoot edit` recalculates the deadline from the original publication time. Reopening or recreating the invitation does not reset it. Existing shoots created before this feature keep unlimited joining until an admin edits their window.
+
+Directly invited members join immediately. Initial invitations cannot be removed through the bot; admins can add further direct invitations with `/shoot add user`. The setup admin is the organizer and retains access. Other verified members react **🎬** on the shared invitation to join, and remove it to leave. Reacting is membership in the chat, not attendance confirmation. Bots cannot join. Eligibility uses an active roster-linked verification or Discord Administrator permission, not membership role names. It is rechecked during synchronization; an account that becomes ineligible loses participant access. The organizer retains access.
 
 TVM uses explicit channel overwrites: other members cannot see shoot chats, and category permissions are not copied. Archived chats are read-only for participants; Discord administrators can still post because Administrator bypasses overwrites. Shoot chats do not permit participant-created threads. There is a conservative maximum of 98 participants, including the organizer.
 

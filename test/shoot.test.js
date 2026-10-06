@@ -9,7 +9,7 @@ const path = require('node:path')
 const { Collection, Embed, ChannelType, PermissionFlagsBits: P, PermissionsBitField } = require('discord.js')
 const Store = require('../src/tvm/Store')
 const { loadShootConfig } = require('../src/tvm/config')
-const { ShootService, shootCommand, parseMembers, parseDetails, overwrites, BOT_PERMISSIONS } = require('../src/tvm/ShootService')
+const { ShootService, shootCommand, parseMembers, parseDetails, overwrites, joinDeadline, joiningAllowed, BOT_PERMISSIONS } = require('../src/tvm/ShootService')
 
 const IDS = {
     guild: '100000000000000001', bot: '100000000000000002', admin: '100000000000000003',
@@ -17,9 +17,10 @@ const IDS = {
     announce: '100000000000000007', active: '100000000000000008', archive: '100000000000000009',
     other: '100000000000000010', extra: '100000000000000011'
 }
-const fields = (name = 'TVM film', time = '2026-10-15 13:30', location = 'Studio') => ({
-    getTextInputValue: key => ({ name, time, location })[key]
-})
+const fields = (name = 'TVM film', value = '2026-10-15 13:30', location = 'Studio', period = 'day') => {
+    const [date = '', time = ''] = value.split(' ')
+    return { getTextInputValue: key => ({ name, date, time, location })[key], getStringSelectValues: () => [period] }
+}
 
 async function fixture(t) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvm-shoot-'))
@@ -82,7 +83,7 @@ async function fixture(t) {
                 object.sends.push(payload)
                 const message = {
                     id: nextId(), channelId: id, guildId: IDS.guild, author: members.get(IDS.bot).user,
-                    embeds: restEmbeds(payload.embeds), content: payload.content || '', nonce: payload.nonce, pinned: false,
+                    embeds: restEmbeds(payload.embeds), content: payload.content || '', nonce: payload.nonce, pinned: false, createdTimestamp: Date.now(),
                     reactions: { cache: new Collection() }, edits: [],
                     edit: async payload => { message.edits.push(payload); message.embeds = restEmbeds(payload.embeds); message.content = payload.content; return message },
                     pin: async () => { message.pinned = true },
@@ -152,12 +153,12 @@ async function fixture(t) {
     const config = { guildId: IDS.guild, shoots: { announcementChannelId: IDS.announce, categoryId: IDS.active, archiveCategoryId: IDS.archive } }
     const service = new ShootService({ client, store, config, alertAdmins: async message => errors.push(message) })
     service.report = async (id, error) => { errors.push({ id, error: error.message }) }
-    function interaction({ command = null, customId = null, channelId = IDS.other, userId = IDS.admin, mentions = '' } = {}) {
+    function interaction({ command = null, customId = null, channelId = IDS.other, userId = IDS.admin, mentions = '', addUserId = IDS.extra } = {}) {
         return {
             guild, guildId: IDS.guild, channelId, channel: channels.get(channelId), user: members.get(userId).user,
             memberPermissions: members.get(userId).permissions,
             commandName: command ? 'shoot' : null, customId,
-            options: { getSubcommand: () => command, getString: () => mentions }, fields: fields(),
+            options: { getSubcommand: () => command, getString: () => mentions, getUser: () => members.get(addUserId).user }, fields: fields(),
             isChatInputCommand: () => Boolean(command), isModalSubmit: () => Boolean(customId),
             replies: [],
             reply: async function(payload) { this.replied = true; this.replies.push(payload) },
@@ -166,11 +167,12 @@ async function fixture(t) {
             showModal: async function(modal) { this.modal = modal.toJSON(); this.replied = true }
         }
     }
-    async function create() {
+    async function create(details = fields()) {
         const setup = interaction({ command: 'setup', mentions: `<@${IDS.invited}>` })
         await service.handleInteraction(setup)
         assert.ok(setup.modal)
         const submit = interaction({ customId: setup.modal.custom_id })
+        submit.fields = details
         await service.handleInteraction(submit)
         const id = setup.modal.custom_id.split(':')[3]
         return { setup, submit, id, shoot: await store.getShoot(id, IDS.guild) }
@@ -210,7 +212,7 @@ test('shoot configuration is optional, complete, distinct, and validates snowfla
     assert.throws(() => loadShootConfig({ ...env, TVM_SHOOT_CATEGORY_ID: 'bad' }))
     const command = shootCommand()
     assert.equal(command.default_member_permissions, String(P.Administrator))
-    assert.deepEqual(command.options.map(option => option.name), ['setup', 'edit', 'crew', 'close', 'reopen'])
+    assert.deepEqual(command.options.map(option => option.name), ['setup', 'edit', 'crew', 'add', 'close', 'reopen'])
 })
 
 test('validates mention input and Toronto calendar/DST times', () => {
@@ -477,8 +479,8 @@ test('unchanged REST embeds are not repeatedly edited during reconciliation', as
     const { shoot } = await f.create()
     await f.service.reconcileAll()
     await f.service.reconcileAll()
-    assert.equal(f.channels.get(shoot.channel_id).messages.cache.get(shoot.brief_id).edits.length, 0)
-    assert.equal(f.channels.get(IDS.announce).messages.cache.get(shoot.announcement_id).edits.length, 0)
+    assert.equal(f.channels.get(shoot.channel_id).messages.cache.get(shoot.brief_id).edits.length, 1)
+    assert.equal(f.channels.get(IDS.announce).messages.cache.get(shoot.announcement_id).edits.length, 1)
 })
 
 test('closed offline join attempts are rejected before reopening', async t => {
@@ -578,4 +580,139 @@ test('failed reaction cleanup cannot prevent revoking an ineligible member', asy
     assert.equal(f.channels.get(shoot.channel_id).permissionOverwrites.cache.has(IDS.joined), false)
     assert.equal((await f.store.shootParticipants(shoot.id)).find(row => row.user_id === IDS.joined).reacted, 0)
     assert.ok(f.errors.some(error => error.error.includes('Manage Messages')))
+})
+
+test('setup modal separates optional date/time and defaults its joining dropdown to one day', async t => {
+    const f = await fixture(t)
+    const { setup, shoot } = await f.create()
+    assert.equal(setup.modal.components.length, 5)
+    const components = setup.modal.components.map(label => label.component)
+    assert.deepEqual(components.slice(0, 4).map(component => component.custom_id), ['name', 'date', 'time', 'location'])
+    assert.equal(components[1].required, false)
+    assert.equal(components[2].required, false)
+    const select = components[4]
+    assert.equal(select.type, 3)
+    assert.equal(select.custom_id, 'join_period')
+    assert.deepEqual(select.options.map(option => option.value), ['day', 'two_days', 'week', 'month', 'never'])
+    assert.deepEqual(select.options.filter(option => option.default).map(option => option.value), ['day'])
+    assert.equal(joinDeadline(shoot), shoot.join_started_at + 86400000)
+    assert.equal(shoot.join_started_at, f.channels.get(IDS.announce).messages.cache.get(shoot.announcement_id).createdTimestamp)
+})
+
+test('blank time means Toronto noon and blank date means no scheduled timestamp', async t => {
+    assert.equal(parseDetails(fields('Shoot', '2026-10-15')).call_time, Date.parse('2026-10-15T16:00:00Z'))
+    assert.equal(parseDetails(fields('Shoot', '2026-12-15')).call_time, Date.parse('2026-12-15T17:00:00Z'))
+    assert.equal(parseDetails(fields('Shoot', '')).call_time, null)
+    assert.equal(parseDetails(fields('Shoot', ' 09:30')).call_time, null)
+    for (const period of ['day', 'two_days', 'week', 'month', 'never']) assert.equal(parseDetails(fields('Shoot', '', 'Studio', period)).join_period, period)
+    assert.throws(() => parseDetails(fields('Shoot', '', 'Studio', 'invalid')), /Choose/)
+    assert.throws(() => parseDetails({ ...fields(), getStringSelectValues: () => [] }), /Choose/)
+    const f = await fixture(t)
+    const { shoot } = await f.create(fields('Undated shoot', ''))
+    assert.equal(shoot.call_time, null)
+    const chat = f.channels.get(shoot.channel_id)
+    assert.equal(chat.messages.cache.get(shoot.brief_id).embeds[0].fields[0].value, 'Unscheduled')
+    const edit = f.interaction({ command: 'edit', channelId: shoot.channel_id })
+    await f.service.handleInteraction(edit)
+    const inputs = edit.modal.components.map(label => label.component)
+    assert.equal(inputs[1].value, undefined)
+    assert.equal(inputs[2].value, undefined)
+})
+
+test('joining periods use elapsed days and enforce the exact expiry boundary independently of call time', () => {
+    for (const [join_period, days] of [['day', 1], ['two_days', 2], ['week', 7], ['month', 30]]) {
+        const shoot = { status: 'open', join_period, join_started_at: 1000, call_time: null }
+        const deadline = 1000 + days * 86400000
+        assert.equal(joinDeadline(shoot), deadline)
+        assert.equal(joiningAllowed(shoot, deadline - 1), true)
+        assert.equal(joiningAllowed(shoot, deadline), false)
+        assert.equal(joiningAllowed(shoot, deadline + 1), false)
+    }
+    assert.equal(joiningAllowed({ status: 'open', join_period: 'never', join_started_at: 1000 }, Number.MAX_SAFE_INTEGER), true)
+    assert.equal(joiningAllowed({ status: 'closed', join_period: 'never', join_started_at: 1000 }), false)
+})
+
+test('expiry keeps the chat and members open, rejects new joins, and permits admin additions', async t => {
+    const f = await fixture(t)
+    let { shoot } = await f.create()
+    await f.react(shoot, 'joined')
+    await f.store.updateShoot(shoot.id, { join_started_at: Date.now() - 86400001 })
+    await f.restart()
+    await f.service.reconcileAll()
+    shoot = await f.store.getShoot(shoot.id, IDS.guild)
+    const chat = f.channels.get(shoot.channel_id)
+    assert.equal(shoot.status, 'open')
+    assert.equal(chat.parentId, IDS.active)
+    assert.ok(allows(chat, IDS.joined, P.SendMessages))
+    const reaction = await f.react(shoot, 'extra')
+    assert.equal(reaction.normal.has(IDS.extra), false)
+    assert.equal(chat.permissionOverwrites.cache.has(IDS.extra), false)
+    assert.match(f.channels.get(IDS.announce).messages.cache.get(shoot.announcement_id).content, /expired/)
+    await f.service.handleInteraction(f.interaction({ command: 'add', channelId: shoot.channel_id, userId: IDS.invited }))
+    assert.equal(chat.permissionOverwrites.cache.has(IDS.extra), false)
+    await f.service.handleInteraction(f.interaction({ command: 'add', channelId: shoot.channel_id, addUserId: IDS.outsider }))
+    assert.equal(chat.permissionOverwrites.cache.has(IDS.outsider), false)
+    await f.service.handleInteraction(f.interaction({ command: 'add', channelId: shoot.channel_id }))
+    assert.ok(allows(chat, IDS.extra, P.SendMessages))
+    await f.react(shoot, 'extra')
+    await f.react(shoot, 'extra', false)
+    assert.ok(allows(chat, IDS.extra, P.SendMessages))
+    await f.react(shoot, 'joined', false)
+    assert.equal(chat.permissionOverwrites.cache.has(IDS.joined), false)
+    await f.react(shoot, 'joined')
+    assert.equal(chat.permissionOverwrites.cache.has(IDS.joined), false)
+})
+
+test('editing can extend joining or choose never; reopening and message recovery do not reset the clock', async t => {
+    const f = await fixture(t)
+    let { shoot } = await f.create()
+    const start = Date.now() - 36 * 3600000
+    await f.store.updateShoot(shoot.id, { join_started_at: start })
+    await f.service.reconcileAll()
+    let edit = f.interaction({ command: 'edit', channelId: shoot.channel_id })
+    await f.service.handleInteraction(edit)
+    let submit = f.interaction({ customId: edit.modal.custom_id, channelId: shoot.channel_id })
+    submit.fields = fields('Film', '', 'Studio', 'two_days')
+    await f.service.handleInteraction(submit)
+    shoot = await f.store.getShoot(shoot.id, IDS.guild)
+    assert.equal(shoot.join_started_at, start)
+    assert.equal(shoot.call_time, null)
+    assert.equal(joiningAllowed(shoot), true)
+    const currentEdit = f.interaction({ command: 'edit', channelId: shoot.channel_id })
+    await f.service.handleInteraction(currentEdit)
+    assert.equal(currentEdit.modal.components[4].component.options.find(option => option.default).value, 'two_days')
+    await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id }))
+    await f.service.handleInteraction(f.interaction({ command: 'reopen', channelId: shoot.channel_id }))
+    assert.equal((await f.store.getShoot(shoot.id, IDS.guild)).join_started_at, start)
+    f.channels.get(IDS.announce).messages.cache.delete(shoot.announcement_id)
+    await f.service.reconcileAll()
+    assert.equal((await f.store.getShoot(shoot.id, IDS.guild)).join_started_at, start)
+    edit = f.interaction({ command: 'edit', channelId: shoot.channel_id })
+    await f.service.handleInteraction(edit)
+    submit = f.interaction({ customId: edit.modal.custom_id, channelId: shoot.channel_id })
+    submit.fields = fields('Film', '', 'Studio', 'never')
+    await f.service.handleInteraction(submit)
+    assert.equal(joinDeadline(await f.store.getShoot(shoot.id, IDS.guild)), null)
+})
+
+test('existing databases migrate with unlimited joining and preserve shoot details and members', async t => {
+    const f = await fixture(t)
+    const { shoot } = await f.create()
+    await f.store._locked(() => f.store._exec('ALTER TABLE shoots DROP COLUMN join_period; ALTER TABLE shoots DROP COLUMN join_started_at;'))
+    await f.restart()
+    const migrated = await f.store.getShoot(shoot.id, IDS.guild)
+    assert.equal(migrated.join_period, 'never')
+    assert.equal(migrated.join_started_at, null)
+    assert.equal(migrated.call_time, shoot.call_time)
+    assert.equal(migrated.channel_id, shoot.channel_id)
+    assert.ok((await f.store.shootParticipants(shoot.id)).some(row => row.user_id === IDS.invited && row.invited))
+    await f.service.reconcileAll()
+    assert.equal(joinDeadline(await f.store.getShoot(shoot.id, IDS.guild)), null)
+})
+
+test('forms from the previous deployment ask admins to reopen instead of partially updating', () => {
+    assert.throws(() => parseDetails({ getTextInputValue: key => {
+        if (key === 'date') throw new Error('Unknown field')
+        return { name: 'Film', time: '2026-10-15 13:30', location: 'Studio' }[key]
+    } }), /expired/)
 })

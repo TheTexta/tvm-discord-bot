@@ -6,13 +6,16 @@ const { DateTime } = require('luxon')
 const {
     ChannelType, PermissionFlagsBits: P, PermissionsBitField, Partials,
     SlashCommandBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
-    ActionRowBuilder, EmbedBuilder, MessageFlags, escapeMarkdown
+    LabelBuilder, StringSelectMenuBuilder, EmbedBuilder, MessageFlags, escapeMarkdown
 } = require('discord.js')
 const { uiText } = require('./uiText')
 
 const EMOJI = '🎬'
 const ZONE = 'America/Toronto'
 const FORMAT = 'yyyy-MM-dd HH:mm'
+const JOIN_PERIODS = { day: 1, two_days: 2, week: 7, month: 30, never: null }
+const PERIOD_TEXT = { day: 'shoot.joinDay', two_days: 'shoot.joinTwoDays', week: 'shoot.joinWeek',
+    month: 'shoot.joinMonth', never: 'shoot.joinNever' }
 const READ = [P.ViewChannel, P.ReadMessageHistory]
 const WRITE = [P.SendMessages, P.SendMessagesInThreads, P.AddReactions]
 const THREADS = [P.CreatePublicThreads, P.CreatePrivateThreads]
@@ -30,15 +33,37 @@ function parseMembers(value = '') {
 }
 
 function parseDetails(fields) {
-    const name = fields.getTextInputValue('name').trim()
-    const location = fields.getTextInputValue('location').trim()
-    const value = fields.getTextInputValue('time').trim()
+    let name, location, date, clock, periods
+    try {
+        name = fields.getTextInputValue('name').trim()
+        location = fields.getTextInputValue('location').trim()
+        date = fields.getTextInputValue('date').trim()
+        clock = fields.getTextInputValue('time').trim() || '12:00'
+        periods = fields.getStringSelectValues('join_period')
+    } catch {
+        // Forms opened before a deployment may still use the previous input layout.
+        throw new Error(uiText('shoot.expired'))
+    }
+    if (periods.length !== 1 || !Object.hasOwn(JOIN_PERIODS, periods[0])) throw new Error(uiText('shoot.invalidJoinPeriod'))
+    const join_period = periods[0]
     if (!name || name.length > 100 || !location || location.length > 200) throw new Error(uiText('shoot.invalidDetails'))
+    if (!date) return { name, location, call_time: null, join_period }
+    const value = `${date} ${clock}`
     const time = DateTime.fromFormat(value, FORMAT, { zone: ZONE, locale: 'en' })
     // Luxon normalizes DST gaps forward: round-trip to reject that normalization.
     if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(value) || !time.isValid || time.toFormat(FORMAT) !== value ||
         time.getPossibleOffsets().length !== 1) throw new Error(uiText('shoot.invalidTime'))
-    return { name, location, call_time: time.toMillis() }
+    return { name, location, call_time: time.toMillis(), join_period }
+}
+
+function joinDeadline(shoot) {
+    const days = JOIN_PERIODS[shoot.join_period]
+    return days == null || shoot.join_started_at == null ? null : shoot.join_started_at + days * 86400000
+}
+
+function joiningAllowed(shoot, now = Date.now()) {
+    const deadline = joinDeadline(shoot)
+    return ['open', 'reopening'].includes(shoot.status) && (deadline == null || now < deadline)
 }
 
 function shootCommand() {
@@ -48,6 +73,8 @@ function shootCommand() {
             .addStringOption(o => o.setName('members').setDescription(uiText('shoot.membersOption')).setMaxLength(1700)))
         .addSubcommand(s => s.setName('edit').setDescription(uiText('shoot.edit')))
         .addSubcommand(s => s.setName('crew').setDescription(uiText('shoot.crew')))
+        .addSubcommand(s => s.setName('add').setDescription(uiText('shoot.add'))
+            .addUserOption(o => o.setName('user').setDescription(uiText('shoot.addUserOption')).setRequired(true)))
         .addSubcommand(s => s.setName('close').setDescription(uiText('shoot.close')))
         .addSubcommand(s => s.setName('reopen').setDescription(uiText('shoot.reopen'))).toJSON()
 }
@@ -55,17 +82,22 @@ function shootCommand() {
 function modal(shoot, edit = false) {
     const id = `tvm:shoot:${edit ? 'edit' : 'setup'}:${shoot.id}${edit ? `:${shoot.revision}` : ''}`
     const inputs = [
-        ['name', uiText('shoot.nameLabel'), 100, shoot.name],
-        ['time', uiText('shoot.timeLabel'), 16, shoot.call_time ? DateTime.fromMillis(shoot.call_time, { zone: ZONE }).toFormat(FORMAT) : ''],
-        ['location', uiText('shoot.locationLabel'), 200, shoot.location]
+        ['name', uiText('shoot.nameLabel'), 100, shoot.name, true],
+        ['date', uiText('shoot.dateLabel'), 10, shoot.call_time != null ? DateTime.fromMillis(shoot.call_time, { zone: ZONE }).toFormat('yyyy-MM-dd') : '', false],
+        ['time', uiText('shoot.timeLabel'), 5, shoot.call_time != null ? DateTime.fromMillis(shoot.call_time, { zone: ZONE }).toFormat('HH:mm') : '', false],
+        ['location', uiText('shoot.locationLabel'), 200, shoot.location, true]
     ]
+    const select = new StringSelectMenuBuilder().setCustomId('join_period').setMinValues(1).setMaxValues(1).setRequired(true)
+        .addOptions(Object.keys(JOIN_PERIODS).map(value => ({ label: uiText(PERIOD_TEXT[value]), value,
+            default: value === shoot.join_period })))
     return new ModalBuilder().setCustomId(id).setTitle(edit ? uiText('shoot.editTitle') : uiText('shoot.setupTitle'))
-        .addComponents(inputs.map(([id, label, max, value]) => {
-            const input = new TextInputBuilder().setCustomId(id).setLabel(label)
-                .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(max)
+        .addLabelComponents(...inputs.map(([id, label, max, value, required]) => {
+            const input = new TextInputBuilder().setCustomId(id)
+                .setStyle(TextInputStyle.Short).setRequired(required).setMaxLength(max)
             if (value) input.setValue(value)
-            return new ActionRowBuilder().addComponents(input)
-        }))
+            return new LabelBuilder().setLabel(label).setTextInputComponent(input)
+        }), new LabelBuilder().setLabel(uiText('shoot.joinLabel')).setDescription(uiText('shoot.joinDescription'))
+            .setStringSelectMenuComponent(select))
 }
 
 function overwrites(guildId, botId, participantIds, closed) {
@@ -202,6 +234,17 @@ class ShootService {
                 await interaction.editReply({ embeds: [embed], allowedMentions: noMentions })
                 return
             }
+            if (action === 'add') {
+                if (current.status !== 'open') throw new Error(uiText('shoot.addOpenOnly'))
+                const user = interaction.options.getUser('user', true)
+                if (!await this.eligible(interaction.guild, user.id)) throw new Error(uiText('shoot.ineligible', { userId: user.id }))
+                const participants = await this.participantIds(current, interaction.guild)
+                if (!participants.includes(user.id) && participants.length >= 98) throw new Error(uiText('shoot.full'))
+                await this.store.inviteShootParticipant(shoot.id, user.id)
+                await this.synchronize(shoot.id)
+                await interaction.editReply({ content: uiText('shoot.added', { userId: user.id }), allowedMentions: noMentions })
+                return
+            }
             if (action === 'close' || action === 'reopen') {
                 if (!['open', 'closed'].includes(current.status)) throw new Error(uiText('shoot.pending'))
                 // Honor the current admission policy before changing it, including
@@ -271,16 +314,24 @@ class ShootService {
     }
 
     render(shoot, kind, closed) {
+        const deadline = joinDeadline(shoot)
+        const expired = deadline != null && Date.now() >= deadline
+        const joinValue = deadline != null ? `<t:${Math.floor(deadline / 1000)}:F>` :
+            (shoot.join_period === 'never' ? uiText('shoot.joinNever') :
+                uiText('shoot.joinPending', { period: uiText(PERIOD_TEXT[shoot.join_period]) }))
         const embed = new EmbedBuilder().setTitle(escapeMarkdown(shoot.name)).setColor(closed ? 0x747f8d : 0x9b59b6)
             .setDescription(closed ? uiText('shoot.statusClosed') : uiText('shoot.statusOpen'))
             .addFields(
-                { name: uiText('shoot.callField'), value: `<t:${Math.floor(shoot.call_time / 1000)}:F>` },
+                { name: uiText('shoot.callField'), value: shoot.call_time == null ? uiText('shoot.unscheduled') :
+                    `<t:${Math.floor(shoot.call_time / 1000)}:F>` },
                 { name: uiText('shoot.locationField'), value: escapeMarkdown(shoot.location) },
                 { name: uiText('shoot.organizerField'), value: `<@${shoot.organizer_id}>` },
-                { name: uiText('shoot.chatField'), value: `<#${shoot.channel_id}>` }
+                { name: uiText('shoot.chatField'), value: `<#${shoot.channel_id}>` },
+                { name: uiText('shoot.joinField'), value: joinValue }
             ).setFooter({ text: uiText('shoot.marker', { shootId: shoot.id, kind }) })
         return { embeds: [embed], content: kind === 'invitation' ?
-            (closed ? uiText('shoot.closedInvitation') : uiText('shoot.invitation')) : '', allowedMentions: noMentions }
+            (closed ? uiText('shoot.closedInvitation') : expired ? uiText('shoot.expiredInvitation') :
+                uiText('shoot.invitation')) : '', allowedMentions: noMentions }
     }
 
     async ensureMessage(channel, shoot, kind, column, closed) {
@@ -289,7 +340,10 @@ class ShootService {
         const payload = this.render(shoot, kind, closed)
         const invited = kind === 'invitation' ? (await this.store.shootParticipants(shoot.id))
             .filter(row => row.invited && row.user_id !== shoot.organizer_id) : []
-        if (invited.length) payload.content += '\n' + uiText('shoot.directInvites', { members: invited.map(row => `<@${row.user_id}>`).join(' ') })
+        if (invited.length) payload.content += '\n' + uiText('shoot.directInvites', {
+            members: invited.slice(0, 70).map(row => `<@${row.user_id}>`).join(' ')
+        })
+        if (invited.length > 70) payload.content += '\n' + uiText('shoot.directInvitesMore', { count: invited.length - 70 })
         if (!message) {
             if (kind === 'invitation' && !shoot.announcement_id) {
                 payload.allowedMentions = { parse: [], users: invited.map(row => row.user_id) }
@@ -352,6 +406,13 @@ class ShootService {
         await this.ensureMessage(channel, shoot, 'brief', 'brief_id', closed)
         const announcementChannel = await guild.channels.fetch(this.settings.announcementChannelId)
         const announcement = await this.ensureMessage(announcementChannel, shoot, 'invitation', 'announcement_id', closed)
+        if (shoot.join_started_at == null) {
+            // Use the actual publication time even when recovering a lost send response.
+            await this.store.updateShoot(id, { join_started_at: announcement.createdTimestamp ?? shoot.created_at })
+            shoot = await this.store.getShoot(id, guild.id)
+            await this.ensureMessage(channel, shoot, 'brief', 'brief_id', closed)
+            await this.ensureMessage(announcementChannel, shoot, 'invitation', 'announcement_id', closed)
+        }
         if (!announcement.reactions.cache.get(EMOJI)?.me) await announcement.react(EMOJI)
         if (['provisioning', 'closing', 'reopening'].includes(shoot.status)) {
             await this.store.updateShoot(id, { status: closed ? 'closed' : 'open' })
@@ -392,7 +453,7 @@ class ShootService {
                 if (!row.invited) enrolled--
             }
         }
-        const accepts = ['open', 'reopening'].includes(shoot.status)
+        const accepts = joiningAllowed(shoot)
         for (const [userId, user] of users) {
             const row = rowsById.get(userId)
             const existing = Boolean(row?.invited || row?.reacted)
@@ -457,5 +518,5 @@ class ShootService {
     }
 }
 
-module.exports = { ShootService, shootCommand, parseMembers, parseDetails, overwrites,
+module.exports = { ShootService, shootCommand, parseMembers, parseDetails, overwrites, joinDeadline, joiningAllowed,
     BOT_PERMISSIONS, ANNOUNCEMENT_PERMISSIONS, partials: [Partials.Message, Partials.Reaction, Partials.User] }

@@ -50,7 +50,8 @@ class Store {
                 id TEXT PRIMARY KEY, guild_id TEXT NOT NULL, organizer_id TEXT NOT NULL,
                 name TEXT NOT NULL DEFAULT '', call_time INTEGER, location TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'draft', channel_id TEXT UNIQUE, brief_id TEXT,
-                announcement_id TEXT UNIQUE, created_at INTEGER NOT NULL, revision INTEGER NOT NULL DEFAULT 0);
+                announcement_id TEXT UNIQUE, created_at INTEGER NOT NULL, revision INTEGER NOT NULL DEFAULT 0,
+                join_period TEXT NOT NULL DEFAULT 'never', join_started_at INTEGER);
             CREATE INDEX IF NOT EXISTS idx_shoots_guild ON shoots(guild_id);
             CREATE TABLE IF NOT EXISTS shoot_participants (
                 shoot_id TEXT NOT NULL, user_id TEXT NOT NULL, invited INTEGER NOT NULL DEFAULT 0,
@@ -61,7 +62,9 @@ class Store {
                 ['email_claims', 'managed_role', 'INTEGER NOT NULL DEFAULT 0'],
                 ['email_claims', 'managed_exec_role', 'INTEGER NOT NULL DEFAULT 0'],
                 ['email_claims', 'managed_admin_role', 'INTEGER NOT NULL DEFAULT 0'],
-                ['shoot_participants', 'reaction_message_id', 'TEXT']
+                ['shoot_participants', 'reaction_message_id', 'TEXT'],
+                ['shoots', 'join_period', "TEXT NOT NULL DEFAULT 'never'"],
+                ['shoots', 'join_started_at', 'INTEGER']
             ]) {
                 const columns = await this._all(`PRAGMA table_info(${table})`)
                 if (!columns.some(item => item.name === column)) await this._exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`)
@@ -371,7 +374,7 @@ class Store {
         return this._locked(async () => {
             await this._exec('BEGIN IMMEDIATE')
             try {
-                await this._run('INSERT INTO shoots (id, guild_id, organizer_id, created_at) VALUES (?, ?, ?, ?)',
+                await this._run("INSERT INTO shoots (id, guild_id, organizer_id, created_at, join_period) VALUES (?, ?, ?, ?, 'day')",
                     [id, guildId, organizerId, Date.now()])
                 for (const userId of new Set([organizerId, ...invitedIds])) {
                     await this._run('INSERT INTO shoot_participants (shoot_id, user_id, invited) VALUES (?, ?, 1)', [id, userId])
@@ -396,7 +399,8 @@ class Store {
         return this._locked(() => this._all("SELECT * FROM shoots WHERE guild_id = ? AND status != 'draft'", [guildId]))
     }
     updateShoot(id, values) {
-        const allowed = ['name', 'call_time', 'location', 'status', 'channel_id', 'brief_id', 'announcement_id']
+        const allowed = ['name', 'call_time', 'location', 'status', 'channel_id', 'brief_id', 'announcement_id',
+            'join_period', 'join_started_at']
         const keys = Object.keys(values)
         if (!keys.length || keys.some(key => !allowed.includes(key))) throw new Error('Invalid shoot update')
         return this._locked(() => this._run(`UPDATE shoots SET ${keys.map(key => `${key} = ?`).join(', ')},
@@ -409,6 +413,10 @@ class Store {
         return this._locked(() => this._run(`INSERT INTO shoot_participants (shoot_id, user_id, reacted, reaction_message_id) VALUES (?, ?, ?, ?)
             ON CONFLICT(shoot_id, user_id) DO UPDATE SET reacted = excluded.reacted, reaction_message_id = excluded.reaction_message_id`,
             [id, userId, reacted ? 1 : 0, messageId]))
+    }
+    inviteShootParticipant(id, userId) {
+        return this._locked(() => this._run(`INSERT INTO shoot_participants (shoot_id, user_id, invited) VALUES (?, ?, 1)
+            ON CONFLICT(shoot_id, user_id) DO UPDATE SET invited = 1`, [id, userId]))
     }
     close() { return new Promise((resolve, reject) => this.db.close(error => error ? reject(error) : resolve())) }
 }
