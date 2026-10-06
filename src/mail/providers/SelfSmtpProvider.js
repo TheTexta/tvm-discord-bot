@@ -10,6 +10,13 @@
 const nodemailer = require('nodemailer')
 const MailProvider = require('./MailProvider')
 
+const timeouts = {
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000,
+    dnsTimeout: 10000
+}
+
 module.exports = class SelfSmtpProvider extends MailProvider {
     constructor({ smtpHost, username, password, smtpPort, isSecure, isGoogle, fromAddress }) {
         super()
@@ -23,11 +30,13 @@ module.exports = class SelfSmtpProvider extends MailProvider {
 
         if (isGoogle) {
             this.transporter = nodemailer.createTransport({
+                ...timeouts,
                 service: 'gmail',
                 auth: { user: username, pass: password }
             })
         } else {
             this.transporter = nodemailer.createTransport({
+                ...timeouts,
                 host: smtpHost,
                 port: smtpPort || 587,
                 secure: isSecure || false,
@@ -38,7 +47,13 @@ module.exports = class SelfSmtpProvider extends MailProvider {
         }
     }
 
-    get name() { return 'self-smtp' }
+    get name() {
+        return 'self-smtp'
+    }
+
+    close() {
+        this.transporter.close()
+    }
 
     /** Verify SMTP connectivity/credentials without sending a mail (nodemailer verify). */
     verify() {

@@ -23,15 +23,24 @@ class UnverifiedRoleManager {
             role = roles.get(this.roleId)
             if (!role) throw new Error(uiText('errors.missingUnverified'))
         } else {
-            const matches = roles.filter(role => role.name === uiText('roles.unverified'))
+            const matches = roles.filter((role) => role.name === uiText('roles.unverified'))
             if (matches.size > 1) throw new Error(uiText('errors.ambiguousUnverified'))
-            role = matches.first() || await guild.roles.create({
-                name: uiText('roles.unverified'), permissions: [], mentionable: true,
-                reason: uiText('roleReasons.create')
-            })
+            role =
+                matches.first() ||
+                (await guild.roles.create({
+                    name: uiText('roles.unverified'),
+                    permissions: [],
+                    mentionable: true,
+                    reason: uiText('roleReasons.create')
+                }))
         }
-        if (role.id === guild.id || this.membershipRoleIds.includes(role.id) || role.managed ||
-            role.permissions.bitfield !== 0n || botMember.roles.highest.comparePositionTo(role) <= 0) {
+        if (
+            role.id === guild.id ||
+            this.membershipRoleIds.includes(role.id) ||
+            role.managed ||
+            role.permissions.bitfield !== 0n ||
+            botMember.roles.highest.comparePositionTo(role) <= 0
+        ) {
             throw new Error(uiText('errors.unsafeUnverified'))
         }
         if (!role.mentionable) await role.setMentionable(true, uiText('roleReasons.mentionable'))
@@ -41,7 +50,7 @@ class UnverifiedRoleManager {
 
     needsSync(member) {
         if (!this.roleId || member.guild.id !== this.guildId || member.user.bot) return false
-        const hasOtherRole = member.roles.cache.some(role => role.id !== this.guildId && role.id !== this.roleId)
+        const hasOtherRole = member.roles.cache.some((role) => role.id !== this.guildId && role.id !== this.roleId)
         return member.roles.cache.has(this.roleId) === hasOtherRole
     }
 
@@ -49,7 +58,7 @@ class UnverifiedRoleManager {
         if (!this.needsSync(member)) return null
         // Events and bulk scans can become stale while waiting for the membership
         // lock. Recheck Discord before acting; change only this single role.
-        member = await member.guild.members.fetch({ user: member.id, force: true }).catch(error => {
+        member = await member.guild.members.fetch({ user: member.id, force: true }).catch((error) => {
             if (error.code === 10007) return null
             throw error
         })

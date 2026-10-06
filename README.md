@@ -4,7 +4,7 @@ Members verify with a six-digit code sent to their roster email. Everyone gets `
 
 ## Setup
 
-Requires Node.js 22+, a Discord bot, and a Resend key with a verified sending domain.
+Requires Node.js 22.13+, a Discord bot, and a Resend key with a verified sending domain.
 
 1. Copy `.env.example` to `.env.local` and fill in the values. Use a random secret of at least 32 characters for `VERIFICATION_CODE_SECRET`.
 2. Enable **Server Members Intent** in the Discord Developer Portal. Install the bot with `bot` and `applications.commands` scopes.
@@ -14,8 +14,12 @@ Requires Node.js 22+, a Discord bot, and a Resend key with a verified sending do
 npm ci
 npm test
 npm run discord:check
-TVM_DATABASE_PATH=./config/tvm.db node --env-file=.env.local src/tvm/App.js
+TVM_DATABASE_PATH=./config/tvm.db node --env-file=.env.local src/tvm/index.js
 ```
+
+## Development
+
+Run `npm run check` for lint, formatting, and tests. See [development.md](docs/development.md) for runtime boundaries, migrations, shutdown, and container checks. Historical upstream documentation is archived under [docs/upstream](docs/upstream/README.md).
 
 ## Edit text
 
@@ -27,17 +31,17 @@ Discord limits: command descriptions 100 characters, button labels 80, modal tit
 
 The configured Admin Team role (`TVM_ADMIN_ROLE_ID`) and Discord Administrator permission grant equal access to all bot management commands.
 
-| Command | Purpose |
-| --- | --- |
-| `/testmail` | Check delivery to a controlled inbox, including junk. |
-| `/upload` | Attach a roster CSV to add emails and update roles. Omitted emails stay active; existing roles are preserved. |
-| `/postverify` | Post the public verification button. |
-| `/roster status` | Check roster size and version. |
-| `/roster reconcile` | Retry role synchronization. |
-| `/roster audit` | Review uploads and account changes. |
-| `/roster repair` | Retry role assignment for a claimed email. |
-| `/roster transfer` | Move a claim to another Discord account. |
-| `/roster release` | Unlink a claim and remove bot-managed roles. |
+| Command             | Purpose                                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `/testmail`         | Check delivery to a controlled inbox, including junk.                                                         |
+| `/upload`           | Attach a roster CSV to add emails and update roles. Omitted emails stay active; existing roles are preserved. |
+| `/postverify`       | Post the public verification button.                                                                          |
+| `/roster status`    | Check roster size and version.                                                                                |
+| `/roster reconcile` | Retry role synchronization.                                                                                   |
+| `/roster audit`     | Review uploads and account changes.                                                                           |
+| `/roster repair`    | Retry role assignment for a claimed email.                                                                    |
+| `/roster transfer`  | Move a claim to another Discord account.                                                                      |
+| `/roster release`   | Unlink a claim and remove bot-managed roles.                                                                  |
 
 CSV headers: `Email,Role`. Roles: `GM`, `Exec - Editor`, `Exec - Producer`, `Admin`. Include eligible members only. Other columns are ignored. Limits: 2 MiB, 10,000 rows, no duplicate emails.
 
@@ -45,7 +49,7 @@ CSV headers: `Email,Role`. Roles: `GM`, `Exec - Editor`, `Exec - Producer`, `Adm
 npm run roster:check -- /path/to/eligible-members.csv
 ```
 
-The bot assigns `Unverified` to humans with no other roles. Admins can mention it in their own reminders. Codes expire after 15 minutes. Automatic role revocation is disabled by default.
+The bot assigns `Unverified` to humans with no other roles. Admins can mention it in their own reminders. SMTP connection, greeting, and DNS waits are capped at 10 seconds each, with a 20-second idle socket timeout. Codes expire after 15 minutes. Automatic role revocation is disabled by default.
 
 ## Shoot workspaces
 
@@ -65,14 +69,14 @@ Give the bot View Channels, Read Message History, Send Messages, Embed Links, Ad
 
 All TVM management commands and shoot form submissions allow the configured **Admin Team** role (`TVM_ADMIN_ROLE_ID`) or Discord **Administrator** permission. This includes shoot setup/edit/crew/add/close/reopen, roster upload and all roster operations, posting verification, and test mail. Role membership is checked by ID, not display name, on every interaction. Command defaults allow role-based access; the bot rejects unauthorized users privately. The shoot creator becomes the organizer and retains access.
 
-| Command | Purpose |
-| --- | --- |
+| Command                  | Purpose                                                                                                                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/shoot setup [members]` | Run in any server text channel. Optionally @mention up to 70 members, then enter the shoot name, Toronto call time, and location. Creates a new private chat and shared invitation. |
-| `/shoot edit` | Update the details and joining window; updates the pinned brief and invitation. |
-| `/shoot crew` | Privately show directly invited and reaction-joined participants. |
-| `/shoot add user` | Add an eligible member to an open shoot, including after reaction joining expires. |
-| `/shoot close` | Move the chat to the archive category, preserve participant reading access, and disable posting and new joins. |
-| `/shoot reopen` | Return the chat to the active category and restore eligible members' access. |
+| `/shoot edit`            | Update the details and joining window; updates the pinned brief and invitation.                                                                                                     |
+| `/shoot crew`            | Privately show directly invited and reaction-joined participants.                                                                                                                   |
+| `/shoot add user`        | Add an eligible member to an open shoot, including after reaction joining expires.                                                                                                  |
+| `/shoot close`           | Move the chat to the archive category, preserve participant reading access, and disable posting and new joins.                                                                      |
+| `/shoot reopen`          | Return the chat to the active category and restore eligible members' access.                                                                                                        |
 
 The setup/edit form has separate optional date (`YYYY-MM-DD`) and time (`HH:mm`) fields in `America/Toronto`. A date with a blank time uses **12:00 pm (noon)**. A blank date makes the shoot **Unscheduled**; the time is ignored. Discord displays scheduled call times in each viewer's local timezone. Invalid dates, daylight-saving gaps, and repeated daylight-saving times are rejected. Setup forms expire after 30 minutes; stale edit forms must be reopened.
 
@@ -88,6 +92,8 @@ This release includes no reminders, attendance tracking, production responsibili
 
 ## Deploy
 
+The container runs as UID/GID 1000. Before upgrading a deployment with an existing root-owned data volume, update `/usr/app/config` ownership to UID/GID 1000; see [container checks and volume migration](docs/development.md#container-checks).
+
 Use the Dockerfile or [docker-compose.yml](docker-compose.yml) in Coolify. Set the environment variables, run one replica, and persist `/usr/app/config`. No public port is needed. Back up `tvm.db` with SQLite's backup API or `.backup`. Keep secrets and roster files out of Git.
 
-Based on [EmailVerify](https://github.com/lkaesberg/EmailVerify). [AGPL-3.0-or-later](LICENSE); [original README](docs/UPSTREAM_README.md). Keep the deployed source public; `/source` links to it.
+Based on [EmailVerify](https://github.com/lkaesberg/EmailVerify). [AGPL-3.0-or-later](LICENSE); [original README](docs/upstream/UPSTREAM_README.md). Keep the deployed source public; `/source` links to it.

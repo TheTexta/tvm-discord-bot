@@ -3,10 +3,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const fs = require('node:fs')
-const path = require('node:path')
-const vm = require('node:vm')
-const { createRequire } = require('node:module')
+const { createApp } = require('../src/tvm/App')
 const discord = require('discord.js')
 const { canManageBot } = require('../src/tvm/permissions')
 
@@ -14,52 +11,99 @@ const adminRoleId = '100000000000000012'
 const guildId = '100000000000000001'
 
 function runtime() {
-    const events = new Map(), mail = [], sent = []
+    const events = new Map(),
+        mail = [],
+        sent = []
     class Client {
-        on(event, callback) { events.set(event, callback) }
+        on(event, callback) {
+            events.set(event, callback)
+        }
         once() {}
+        off(event) {
+            events.delete(event)
+        }
+        destroy() {}
         async login() {} // Never connect this test runtime to Discord.
     }
     class Store {
-        async status() { return { count: 2, unreconciled: 0, meta: { version: 1 } } }
-        async audit() { return [] }
-        async lookup() { return null }
-        async claimFor() { return null }
-        async activeClaims() { return [] }
-    }
-    class Mail { async sendMail(payload) { mail.push(payload) } }
-    class Unverified { async syncGuild() { return { added: 0, removed: 0, failed: 0 } } }
-    const filename = path.join(__dirname, '../src/tvm/App.js')
-    const realRequire = createRequire(filename)
-    const module = { exports: {} }
-    vm.runInNewContext(fs.readFileSync(filename, 'utf8') + '\nmodule.exports = commands', {
-        module, console: { error() {} }, process: { exit() { throw new Error('Unexpected exit') } },
-        require: name => {
-            if (name === 'discord.js') return { ...discord, Client }
-            if (name === './config') return { loadConfig: () => ({ guildId, adminRoleId }) }
-            if (name === './Store') return Store
-            if (name === './UnverifiedRoleManager') return Unverified
-            if (name === '../mail/providers/SelfSmtpProvider') return Mail
-            if (name === './ShootService') return { ShootService: class { async handleInteraction() { return false } } }
-            return realRequire(name)
+        async status() {
+            return { count: 2, unreconciled: 0, meta: { version: 1 } }
         }
+        async audit() {
+            return []
+        }
+        async lookup() {
+            return null
+        }
+        async claimFor() {
+            return null
+        }
+        async activeClaims() {
+            return []
+        }
+    }
+    class Mail {
+        async sendMail(payload) {
+            mail.push(payload)
+        }
+    }
+    class Unverified {
+        async syncGuild() {
+            return { added: 0, removed: 0, failed: 0 }
+        }
+    }
+    const app = createApp({
+        config: { guildId, adminRoleId },
+        client: new Client(),
+        store: new Store(),
+        mail: new Mail(),
+        unverifiedRoles: new Unverified(),
+        shoots: {
+            async handleInteraction() {
+                return false
+            },
+            stop() {},
+            async drain() {}
+        },
+        logger: { error() {}, log() {} }
     })
     function interaction(commandName, { role = true, administrator = false, bot = false, subcommand = 'status' } = {}) {
         return {
-            commandName, guildId, user: { id: '100000000000000003', bot },
+            commandName,
+            guildId,
+            user: { id: '100000000000000003', bot },
             member: { roles: { cache: new discord.Collection(role ? [[adminRoleId, {}]] : []) } },
-            memberPermissions: new discord.PermissionsBitField(administrator ? discord.PermissionFlagsBits.Administrator : 0n),
-            options: { getSubcommand: () => subcommand, getString: () => 'example@example.org', getAttachment: () => null,
-                getUser: () => ({ id: '100000000000000004' }) },
-            guild: {}, channel: { send: async payload => sent.push(payload) }, replies: [],
-            isButton: () => false, isModalSubmit: () => false, isChatInputCommand: () => true,
-            async reply(payload) { this.replied = true; this.replies.push(payload) },
-            async deferReply() { this.deferred = true },
-            async editReply(payload) { this.replies.push(payload) },
-            async showModal() { this.modal = true }
+            memberPermissions: new discord.PermissionsBitField(
+                administrator ? discord.PermissionFlagsBits.Administrator : 0n
+            ),
+            options: {
+                getSubcommand: () => subcommand,
+                getString: () => 'example@example.org',
+                getAttachment: () => null,
+                getUser: () => ({ id: '100000000000000004' })
+            },
+            guild: {},
+            channel: { send: async (payload) => sent.push(payload) },
+            replies: [],
+            isButton: () => false,
+            isModalSubmit: () => false,
+            isChatInputCommand: () => true,
+            async reply(payload) {
+                this.replied = true
+                this.replies.push(payload)
+            },
+            async deferReply() {
+                this.deferred = true
+            },
+            async editReply(payload) {
+                this.replies.push(payload)
+            },
+            async showModal() {
+                this.modal = true
+            }
         }
     }
-    return { handle: events.get('interactionCreate'), interaction, commands: module.exports, mail, sent }
+    return { handle: events.get('interactionCreate'), interaction, commands: app.commands, mail, sent }
 }
 
 test('Admin Team and Discord administrators can use the active runtime’s management commands', async () => {
@@ -82,7 +126,7 @@ test('Admin Team and Discord administrators can use the active runtime’s manag
                 assert.doesNotMatch(interaction.replies.at(-1).content, /Something went wrong/)
             }
         }
-        for (const command of app.commands.filter(command => !['verify', 'source'].includes(command.name))) {
+        for (const command of app.commands.filter((command) => !['verify', 'source'].includes(command.name))) {
             assert.equal(command.default_member_permissions, null, command.name)
         }
     }
@@ -90,7 +134,11 @@ test('Admin Team and Discord administrators can use the active runtime’s manag
 
 test('ordinary members and bots cannot invoke management commands; verification remains public', async () => {
     const app = runtime()
-    for (const authority of [{ role: false }, { role: true, bot: true }, { role: false, administrator: true, bot: true }]) {
+    for (const authority of [
+        { role: false },
+        { role: true, bot: true },
+        { role: false, administrator: true, bot: true }
+    ]) {
         for (const command of ['postverify', 'testmail', 'upload', 'roster']) {
             const interaction = app.interaction(command, authority)
             await app.handle(interaction)

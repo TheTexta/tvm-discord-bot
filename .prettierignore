@@ -1,0 +1,11 @@
+node_modules/
+docs/upstream/
+package-lock.json
+plan.md
+.env*
+config/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.csv

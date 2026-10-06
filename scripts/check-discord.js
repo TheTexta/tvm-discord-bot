@@ -3,13 +3,11 @@
 
 const { ApplicationFlagsBitField, PermissionFlagsBits } = require('discord.js')
 const { loadShootConfig } = require('../src/tvm/config')
-const { BOT_PERMISSIONS, ANNOUNCEMENT_PERMISSIONS } = require('../src/tvm/ShootService')
+const { BOT_PERMISSIONS, ANNOUNCEMENT_PERMISSIONS } = require('../src/tvm/shoot/policy')
+const { required: requireValue } = require('../src/tvm/validation')
+const { uiText } = require('../src/tvm/uiText')
 
-const required = name => {
-    const value = process.env[name]?.trim()
-    if (!value) throw new Error(`Missing ${name}`)
-    return value
-}
+const required = (name) => requireValue(process.env, name)
 
 const token = required('DISCORD_BOT_TOKEN')
 const applicationId = required('DISCORD_APPLICATION_ID')
@@ -30,16 +28,24 @@ async function get(path) {
     return { status: response.status, data: response.ok ? await response.json() : null }
 }
 
-function channelPermissions(channel, guild, member, roles, userId,
-    requiredPermissions = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]) {
+function channelPermissions(
+    channel,
+    guild,
+    member,
+    roles,
+    userId,
+    requiredPermissions = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
+) {
     const roleIds = new Set(member.roles)
-    let permissions = BigInt(roles.find(role => role.id === guild.id)?.permissions || 0)
+    let permissions = BigInt(roles.find((role) => role.id === guild.id)?.permissions || 0)
     for (const role of roles) if (roleIds.has(role.id)) permissions |= BigInt(role.permissions)
     if (permissions & PermissionFlagsBits.Administrator) return true
 
     const overwrites = channel.permission_overwrites || []
-    const apply = (deny, allow) => { permissions = (permissions & ~deny) | allow }
-    const everyone = overwrites.find(overwrite => overwrite.id === guild.id)
+    const apply = (deny, allow) => {
+        permissions = (permissions & ~deny) | allow
+    }
+    const everyone = overwrites.find((overwrite) => overwrite.id === guild.id)
     if (everyone) apply(BigInt(everyone.deny), BigInt(everyone.allow))
     let roleDeny = 0n
     let roleAllow = 0n
@@ -50,9 +56,9 @@ function channelPermissions(channel, guild, member, roles, userId,
         }
     }
     apply(roleDeny, roleAllow)
-    const user = overwrites.find(overwrite => overwrite.type === 1 && overwrite.id === userId)
+    const user = overwrites.find((overwrite) => overwrite.type === 1 && overwrite.id === userId)
     if (user) apply(BigInt(user.deny), BigInt(user.allow))
-    return requiredPermissions.every(permission => Boolean(permissions & permission))
+    return requiredPermissions.every((permission) => Boolean(permissions & permission))
 }
 
 async function main() {
@@ -71,33 +77,46 @@ async function main() {
     check('Bot token and application ID', application.data?.id === applicationId && Boolean(bot.data))
     const flags = BigInt(application.data?.flags || 0)
     const intents = ['GatewayGuildMembers', 'GatewayGuildMembersLimited']
-    check('Server Members Intent', intents.some(name => Boolean(flags & BigInt(ApplicationFlagsBitField.Flags[name]))))
+    check(
+        'Server Members Intent',
+        intents.some((name) => Boolean(flags & BigInt(ApplicationFlagsBitField.Flags[name])))
+    )
     check('Bot can access the configured server', guild.data?.id === guildId)
 
     let member
     if (bot.data && guild.data) member = await get(`/guilds/${guildId}/members/${bot.data.id}`)
     check('Bot is installed in the server', Boolean(member?.data))
-    const targets = [memberRoleId, execRoleId, adminRoleId].map(id => roles.data?.find(role => role.id === id))
+    const targets = [memberRoleId, execRoleId, adminRoleId].map((id) => roles.data?.find((role) => role.id === id))
     check('Configured membership, executive, and admin roles exist', targets.every(Boolean))
     const unverified = unverifiedRoleId
-        ? roles.data?.find(role => role.id === unverifiedRoleId)
-        : roles.data?.find(role => role.name === 'Unverified')
+        ? roles.data?.find((role) => role.id === unverifiedRoleId)
+        : roles.data?.find((role) => role.name === uiText('roles.unverified'))
     if (unverifiedRoleId || unverified) {
-        check('Unverified is a separate role with no permissions and mentions enabled', Boolean(unverified) &&
-            ![guildId, memberRoleId, execRoleId, adminRoleId].includes(unverified.id) &&
-            !unverified.managed && BigInt(unverified.permissions) === 0n && unverified.mentionable)
+        check(
+            'Unverified is a separate role with no permissions and mentions enabled',
+            Boolean(unverified) &&
+                ![guildId, memberRoleId, execRoleId, adminRoleId].includes(unverified.id) &&
+                !unverified.managed &&
+                BigInt(unverified.permissions) === 0n &&
+                unverified.mentionable
+        )
         targets.push(unverified)
     }
-    const botRoles = roles.data?.filter(role => member?.data?.roles.includes(role.id)) || []
-    const highest = Math.max(0, ...botRoles.map(role => role.position))
-    let basePermissions = BigInt(roles.data?.find(role => role.id === guildId)?.permissions || 0)
+    const botRoles = roles.data?.filter((role) => member?.data?.roles.includes(role.id)) || []
+    const highest = Math.max(0, ...botRoles.map((role) => role.position))
+    let basePermissions = BigInt(roles.data?.find((role) => role.id === guildId)?.permissions || 0)
     for (const role of botRoles) basePermissions |= BigInt(role.permissions)
-    check('Bot has Manage Roles and sits above all assigned roles',
-        targets.every(role => role && highest > role.position) && Boolean(basePermissions & PermissionFlagsBits.ManageRoles))
+    check(
+        'Bot has Manage Roles and sits above all assigned roles',
+        targets.every((role) => role && highest > role.position) &&
+            Boolean(basePermissions & PermissionFlagsBits.ManageRoles)
+    )
     check('Bot can access the configured alert channel', channel.data?.guild_id === guildId)
     if (channel.data && guild.data && member?.data && roles.data) {
-        check('Bot can view and send in the alert channel',
-            channelPermissions(channel.data, guild.data, member.data, roles.data, bot.data.id))
+        check(
+            'Bot can view and send in the alert channel',
+            channelPermissions(channel.data, guild.data, member.data, roles.data, bot.data.id)
+        )
     }
     if (shoots) {
         const definitions = [
@@ -108,15 +127,21 @@ async function main() {
         const shootChannels = await Promise.all(definitions.map(([id]) => get(`/channels/${id}`)))
         definitions.forEach(([, type, permissions, label], index) => {
             const data = shootChannels[index].data
-            check(`${label} exists in this server with the expected type`, data?.guild_id === guildId && data?.type === type)
-            check(`${label} grants the bot all required permissions`, Boolean(data && guild.data && member?.data && roles.data) &&
-                channelPermissions(data, guild.data, member.data, roles.data, bot.data.id, permissions))
+            check(
+                `${label} exists in this server with the expected type`,
+                data?.guild_id === guildId && data?.type === type
+            )
+            check(
+                `${label} grants the bot all required permissions`,
+                Boolean(data && guild.data && member?.data && roles.data) &&
+                    channelPermissions(data, guild.data, member.data, roles.data, bot.data.id, permissions)
+            )
         })
     }
     if (checks.includes(false)) process.exitCode = 1
 }
 
-main().catch(error => {
+main().catch((error) => {
     console.error(`Discord setup check failed: ${error.name || 'request error'}`)
     process.exitCode = 1
 })

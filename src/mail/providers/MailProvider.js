@@ -8,7 +8,9 @@
 // later version. See the LICENSE file for details.
 
 module.exports = class MailProvider {
-    get name() { return 'unknown' }
+    get name() {
+        return 'unknown'
+    }
 
     /**
      * @param {{ from: string, fromName: string, to: string, subject: string,
@@ -16,7 +18,7 @@ module.exports = class MailProvider {
      * @returns {Promise<{ accepted: string[], rejected: string[],
      *          messageId?: string, response?: string }>}
      */
-    async sendMail(opts) {
+    async sendMail(_opts) {
         throw new Error('MailProvider.sendMail not implemented')
     }
 }

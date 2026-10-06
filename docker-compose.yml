@@ -1,27 +1,28 @@
 services:
-  tvm-verification:
-    build: .
-    restart: unless-stopped
-    init: true
-    environment:
-      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:?required}
-      DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID:?required}
-      TVM_GUILD_ID: ${TVM_GUILD_ID:?required}
-      TVM_MEMBER_ROLE_ID: ${TVM_MEMBER_ROLE_ID:?required}
-      TVM_EXEC_ROLE_ID: ${TVM_EXEC_ROLE_ID:?required}
-      TVM_ADMIN_ROLE_ID: ${TVM_ADMIN_ROLE_ID:?required}
-      TVM_UNVERIFIED_ROLE_ID: ${TVM_UNVERIFIED_ROLE_ID:-}
-      TVM_AUTO_ROLE_REVOCATION: ${TVM_AUTO_ROLE_REVOCATION:-false}
-      TVM_ADMIN_ALERT_CHANNEL_ID: ${TVM_ADMIN_ALERT_CHANNEL_ID:?required}
-      SMTP_FROM: ${SMTP_FROM:?required}
-      RESEND_API_KEY: ${RESEND_API_KEY:?required}
-      VERIFICATION_CODE_SECRET: ${VERIFICATION_CODE_SECRET:?required}
-      TVM_DATABASE_PATH: /usr/app/config/tvm.db
-      TVM_SHOOT_ANNOUNCEMENT_CHANNEL_ID: ${TVM_SHOOT_ANNOUNCEMENT_CHANNEL_ID:-}
-      TVM_SHOOT_CATEGORY_ID: ${TVM_SHOOT_CATEGORY_ID:-}
-      TVM_SHOOT_ARCHIVE_CATEGORY_ID: ${TVM_SHOOT_ARCHIVE_CATEGORY_ID:-}
-    volumes:
-      - tvm_data:/usr/app/config
+    tvm-verification:
+        build: .
+        restart: unless-stopped
+        init: true
+        stop_grace_period: 30s
+        environment:
+            DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:?required}
+            DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID:?required}
+            TVM_GUILD_ID: ${TVM_GUILD_ID:?required}
+            TVM_MEMBER_ROLE_ID: ${TVM_MEMBER_ROLE_ID:?required}
+            TVM_EXEC_ROLE_ID: ${TVM_EXEC_ROLE_ID:?required}
+            TVM_ADMIN_ROLE_ID: ${TVM_ADMIN_ROLE_ID:?required}
+            TVM_UNVERIFIED_ROLE_ID: ${TVM_UNVERIFIED_ROLE_ID:-}
+            TVM_AUTO_ROLE_REVOCATION: ${TVM_AUTO_ROLE_REVOCATION:-false}
+            TVM_ADMIN_ALERT_CHANNEL_ID: ${TVM_ADMIN_ALERT_CHANNEL_ID:?required}
+            SMTP_FROM: ${SMTP_FROM:?required}
+            RESEND_API_KEY: ${RESEND_API_KEY:?required}
+            VERIFICATION_CODE_SECRET: ${VERIFICATION_CODE_SECRET:?required}
+            TVM_DATABASE_PATH: /usr/app/config/tvm.db
+            TVM_SHOOT_ANNOUNCEMENT_CHANNEL_ID: ${TVM_SHOOT_ANNOUNCEMENT_CHANNEL_ID:-}
+            TVM_SHOOT_CATEGORY_ID: ${TVM_SHOOT_CATEGORY_ID:-}
+            TVM_SHOOT_ARCHIVE_CATEGORY_ID: ${TVM_SHOOT_ARCHIVE_CATEGORY_ID:-}
+        volumes:
+            - tvm_data:/usr/app/config
 
 volumes:
-  tvm_data:
+    tvm_data:

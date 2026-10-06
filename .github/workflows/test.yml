@@ -1,18 +1,25 @@
 name: Test TVM verification
 
 on:
-  push:
-  pull_request:
+    push:
+    pull_request:
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci
-      - run: npm test
-      - run: npm audit --omit=dev --audit-level=moderate
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: '22'
+                  cache: npm
+            - run: npm ci
+            - run: npm run check
+            - run: npm audit --omit=dev --audit-level=moderate
+
+    container:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - run: docker build -t tvm-verification:test .
+            - run: docker run --rm tvm-verification:test node scripts/check-container.js

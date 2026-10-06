@@ -4,6 +4,7 @@
 const fs = require('node:fs')
 const { parseRoster } = require('../src/tvm/roster')
 const Store = require('../src/tvm/Store')
+const { loadRosterConfig } = require('../src/tvm/config')
 
 const filename = process.argv[2]
 const expectedCount = Number(process.argv[3])
@@ -15,14 +16,12 @@ if (!filename || !Number.isSafeInteger(expectedCount) || expectedCount <= 0) {
 async function main() {
     const rows = parseRoster(fs.readFileSync(filename, 'utf8'))
     if (rows.length !== expectedCount) throw new Error('Roster row count differs from expected count')
-    const guildId = process.env.TVM_GUILD_ID
-    const secret = process.env.VERIFICATION_CODE_SECRET
-    if (!guildId || !secret) throw new Error('Missing guild ID or verification code secret')
-    const store = new Store(process.env.TVM_DATABASE_PATH || '/usr/app/config/tvm.db', secret)
+    const { guildId, codeSecret, databasePath } = loadRosterConfig()
+    const store = new Store(databasePath, codeSecret)
     try {
-        const current = await store._all('SELECT email FROM email_roster WHERE guild_id = ?', [guildId])
-        const existing = new Set(current.map(row => row.email))
-        if (existing.size !== expectedCount || rows.some(row => !existing.has(row.email))) {
+        const current = await store.rosterEntries(guildId)
+        const existing = new Set(current.map((row) => row.email))
+        if (existing.size !== expectedCount || rows.some((row) => !existing.has(row.email))) {
             throw new Error('Candidate emails differ from the active roster; no changes made')
         }
         const result = await store.replaceRoster(guildId, rows, 'system:role-migration')
@@ -32,7 +31,7 @@ async function main() {
     }
 }
 
-main().catch(error => {
+main().catch((error) => {
     console.error(`Roster role update failed: ${error.message}`)
     process.exitCode = 1
 })

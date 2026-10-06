@@ -1,36 +1,17 @@
-# Without this file `COPY . /usr/app/` bakes whatever happens to be in the
-# working tree into the image. CI builds from a clean checkout so it never
-# noticed, but a local `docker build` would copy in host node_modules (whose
-# native sqlite3 binding is built for the wrong platform -- "invalid ELF
-# header" at runtime) and, worse, the operator's real config.json and bot.db
-# into an image published to a public registry.
-.git
-.github
-node_modules
-npm-debug.log
-.env
-.env.*
-*.csv
-*.sqlite
-*.sqlite-*
-config/tvm.db
-config/tvm.db-shm
-config/tvm.db-wal
-
-# Secrets and live state -- never belongs in an image.
-config/config.json
-config/bot.db
-config/bot.db-shm
-config/bot.db-wal
-config/ServerStats.json
-config/ServerStatsHistory.log
-src/bot.db
-discord-verify.txt
-
-# Docs site + tooling artefacts.
-site
-docs
-mkdocs.yml
-hooks
-.playwright-mcp
-.idea
+# Only application sources, manifests, editable text, and operational scripts are build inputs.
+**
+!package.json
+!package-lock.json
+!ui-text.json
+!LICENSE
+!src/
+!src/**
+!scripts/
+!scripts/**
+!Dockerfile
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*
+**/*.csv
+**/.env*
