@@ -48,3 +48,30 @@ test('roster maintenance configuration needs only validated database and guild c
         }
     )
 })
+
+test('local database default is portable and membership roles cannot target everyone', () => {
+    assert.equal(loadRosterConfig(env).databasePath, './config/tvm.db')
+    for (const key of ['TVM_MEMBER_ROLE_ID', 'TVM_EXEC_ROLE_ID', 'TVM_ADMIN_ROLE_ID']) {
+        assert.throws(() => loadConfig({ ...env, [key]: env.TVM_GUILD_ID }), /@everyone/)
+    }
+})
+
+test('optional local environment loading works with absent files and respects exported variables', (t) => {
+    const fs = require('node:fs')
+    const os = require('node:os')
+    const path = require('node:path')
+    const { spawnSync } = require('node:child_process')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvm-env-'))
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+    const run = (env = {}) =>
+        spawnSync(
+            process.execPath,
+            ['--env-file-if-exists=.env.local', '-e', 'process.stdout.write(process.env.TVM_TEST_VALUE || "missing")'],
+            { cwd: dir, env, encoding: 'utf8' }
+        )
+    assert.equal(run().status, 0)
+    assert.equal(run().stdout, 'missing')
+    fs.writeFileSync(path.join(dir, '.env.local'), 'TVM_TEST_VALUE=file\n')
+    assert.equal(run().stdout, 'file')
+    assert.equal(run({ TVM_TEST_VALUE: 'exported' }).stdout, 'exported')
+})

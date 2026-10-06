@@ -1,10 +1,10 @@
 {
-    "name": "tvm-discord-email-verification",
+    "name": "tvm-discord-bot",
     "version": "1.0.0",
-    "description": "Roster-gated TVM Discord email verification, based on EmailVerify",
+    "description": "TVM Discord bot for roster-based membership verification and private shoot workspaces",
     "main": "src/tvm/App.js",
     "scripts": {
-        "start": "node src/tvm/index.js",
+        "start": "node --env-file-if-exists=.env.local src/tvm/index.js",
         "test": "node --test test/*.test.js",
         "roster:check": "node scripts/check-roster.js",
         "discord:check": "node --env-file=.env.local scripts/check-discord.js",
@@ -30,5 +30,14 @@
         "eslint": "^10.12.0",
         "globals": "^17.13.0",
         "prettier": "^3.9.9"
-    }
+    },
+    "private": true,
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/TheTexta/tvm-discord-bot.git"
+    },
+    "bugs": {
+        "url": "https://github.com/TheTexta/tvm-discord-bot/issues"
+    },
+    "homepage": "https://github.com/TheTexta/tvm-discord-bot#readme"
 }

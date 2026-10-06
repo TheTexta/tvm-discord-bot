@@ -344,3 +344,29 @@ test('closing the store drains queued writes, rejects new work, and is idempoten
         fs.rmSync(dir, { recursive: true, force: true })
     }
 })
+
+test('cleanup removes expired draft participants atomically and preserves submitted and fresh shoots', async (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvm-drafts-'))
+    const store = new Store(path.join(dir, 'test.db'), 's'.repeat(32))
+    t.after(async () => {
+        await store.close()
+        fs.rmSync(dir, { recursive: true, force: true })
+    })
+    for (const id of ['expired', 'fresh', 'submitted']) await store.createShootDraft(id, 'guild', 'admin', ['member'])
+    await store._run('UPDATE shoots SET created_at = ? WHERE id != ?', [Date.now() - 31 * 60000, 'fresh'])
+    await store.updateShoot('submitted', { status: 'provisioning' })
+    const original = store._run.bind(store)
+    store._run = (sql, params) =>
+        sql.startsWith('DELETE FROM shoots') ? Promise.reject(new Error('cleanup failed')) : original(sql, params)
+    await assert.rejects(store.sweep(), /cleanup failed/)
+    assert.equal((await store.shootParticipants('expired')).length, 2)
+    assert.ok(await store.getShoot('expired', 'guild'))
+    store._run = original
+    await store.sweep()
+    assert.equal(await store.getShoot('expired', 'guild'), undefined)
+    assert.deepEqual(await store.shootParticipants('expired'), [])
+    for (const id of ['fresh', 'submitted']) {
+        assert.ok(await store.getShoot(id, 'guild'))
+        assert.equal((await store.shootParticipants(id)).length, 2)
+    }
+})

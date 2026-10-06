@@ -10,7 +10,7 @@ RUN npm ci --omit=dev --build-from-source=sqlite3 --sqlite=/usr
 FROM node:22-bookworm-slim AS runtime
 
 LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
-LABEL org.opencontainers.image.source="https://github.com/TheTexta/tvm-discord-email-verification"
+LABEL org.opencontainers.image.source="https://github.com/TheTexta/tvm-discord-bot"
 
 ENV NODE_ENV=production
 WORKDIR /usr/app

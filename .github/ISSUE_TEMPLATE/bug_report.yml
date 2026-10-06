@@ -1,0 +1,21 @@
+name: Bug report
+description: Report unexpected bot behavior.
+body:
+    - type: textarea
+      id: behavior
+      attributes:
+          label: What happened, and what did you expect?
+      validations:
+          required: true
+    - type: textarea
+      id: reproduce
+      attributes:
+          label: Steps to reproduce
+          description: Use synthetic accounts and redact credentials, email addresses, and member data.
+      validations:
+          required: true
+    - type: input
+      id: revision
+      attributes:
+          label: Revision and deployment environment
+          placeholder: Commit SHA, Node version, Docker or local

@@ -5,6 +5,8 @@ node_modules
 config/tvm.db
 config/tvm.db-*
 *.csv
+*.db
+*.db-*
 *.sqlite
 *.sqlite-*
 config/config.json

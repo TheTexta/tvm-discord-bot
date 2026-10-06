@@ -3,6 +3,7 @@
 
 const { EmbedBuilder, escapeMarkdown } = require('discord.js')
 const { uiText } = require('../uiText')
+const { shootMarker } = require('./identifiers')
 const { joinDeadline, PERIOD_TEXT, noMentions } = require('./policy')
 
 function renderShoot(shoot, kind, closed, now = Date.now()) {
@@ -33,7 +34,7 @@ function renderShoot(shoot, kind, closed, now = Date.now()) {
             { name: uiText('shoot.chatField'), value: `<#${shoot.channel_id}>` },
             { name: uiText('shoot.joinField'), value: joinValue }
         )
-        .setFooter({ text: uiText('shoot.marker', { shootId: shoot.id, kind }) })
+        .setFooter({ text: shootMarker(shoot.id, kind) })
     return {
         embeds: [embed],
         content:

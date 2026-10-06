@@ -12,7 +12,7 @@ npm audit --omit=dev --audit-level=moderate
 ## Runtime boundaries
 
 - `src/tvm/index.js` owns environment loading, dependency construction, login, and process signals.
-- `src/tvm/App.js` exports `createApp` with injected configuration, store, mail, client, and optional adapters. Importing it does not open a database or connect to Discord.
+- `src/tvm/App.js` exports `createApp` with injected configuration, store, mail, client, and optional adapters. Importing it does not open a database or connect to Discord. `start()` resolves only after startup validation and initialization; failures reject it. Shutdown rejects unfinished startup and prevents new timers.
 - `VerificationService.js` owns challenges and delivery; `RosterCommands.js` owns roster and account management commands.
 - `MembershipService.js` owns membership role reconciliation and preserves ownership of pre-existing roles.
 - `Store.js` serializes database access; `_transaction` runs within that queue or during initialization. Operational scripts use public methods.
@@ -27,8 +27,8 @@ SIGTERM/SIGINT stop incoming work and timers, drain accepted work, close mail an
 ## Container checks
 
 ```sh
-docker build -t tvm-verification:test .
-docker run --rm tvm-verification:test node scripts/check-container.js
+docker build -t tvm-discord-bot:test .
+docker run --rm tvm-discord-bot:test node scripts/check-container.js
 ```
 
 The smoke check exercises native SQLite, migrations, persistence permissions, and import-safe startup as the runtime user. CI builds and checks the image independently of local tests. Compilation uses Debian bookworm in both stages to preserve native-binding compatibility.
@@ -36,3 +36,5 @@ The smoke check exercises native SQLite, migrations, persistence permissions, an
 The container runs as UID/GID 1000. A new data volume is writable by that user. For an existing deployment whose volume is owned by root, update `/usr/app/config` ownership to UID/GID 1000 before deploying. Preserve restrictive database permissions and take a SQLite backup first.
 
 The inherited EmailVerify site is retained under `docs/upstream` for historical reference. It is not the TVM operator guide.
+
+Editable-message keys and placeholders are declared in `src/tvm/uiTextSchema.json`. Update that contract alongside intentional message additions; wording-only changes must preserve it. Shoot recovery identifiers keep their deployed format and are not editable copy. Expired setup drafts and their participant rows are removed transactionally at startup and hourly.
