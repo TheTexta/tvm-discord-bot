@@ -7,6 +7,18 @@ function required(name) {
     return value
 }
 
+function loadShootConfig(env = process.env) {
+    const names = ['TVM_SHOOT_ANNOUNCEMENT_CHANNEL_ID', 'TVM_SHOOT_CATEGORY_ID', 'TVM_SHOOT_ARCHIVE_CATEGORY_ID']
+    const ids = names.map(name => env[name]?.trim() || null)
+    if (ids.every(id => !id)) return null
+    if (ids.some(id => !id)) throw new Error('Configure all three TVM_SHOOT_* channel/category IDs or leave all unset')
+    ids.forEach((id, index) => {
+        if (!/^\d{17,20}$/.test(id)) throw new Error(`Invalid ${names[index]}`)
+    })
+    if (new Set(ids).size !== 3) throw new Error('Shoot announcement and category IDs must be distinct')
+    return { announcementChannelId: ids[0], categoryId: ids[1], archiveCategoryId: ids[2] }
+}
+
 function loadConfig() {
     const config = {
         token: required('DISCORD_BOT_TOKEN'),
@@ -23,7 +35,8 @@ function loadConfig() {
         autoRoleRevocation: process.env.TVM_AUTO_ROLE_REVOCATION === 'true',
         databasePath: process.env.TVM_DATABASE_PATH || '/usr/app/config/tvm.db',
         smtpHost: process.env.SMTP_HOST || 'smtp.resend.com',
-        smtpPort: Number(process.env.SMTP_PORT || 465)
+        smtpPort: Number(process.env.SMTP_PORT || 465),
+        shoots: loadShootConfig()
     }
     for (const key of ['applicationId', 'guildId', 'memberRoleId', 'execRoleId', 'adminRoleId', 'alertChannelId']) {
         if (!/^\d{17,20}$/.test(config[key])) throw new Error(`Invalid ${key}`)
@@ -39,4 +52,4 @@ function loadConfig() {
     return config
 }
 
-module.exports = { loadConfig }
+module.exports = { loadConfig, loadShootConfig }

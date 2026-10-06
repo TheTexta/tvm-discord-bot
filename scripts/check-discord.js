@@ -2,6 +2,8 @@
 'use strict'
 
 const { ApplicationFlagsBitField, PermissionFlagsBits } = require('discord.js')
+const { loadShootConfig } = require('../src/tvm/config')
+const { BOT_PERMISSIONS, ANNOUNCEMENT_PERMISSIONS } = require('../src/tvm/ShootService')
 
 const required = name => {
     const value = process.env[name]?.trim()
@@ -17,6 +19,7 @@ const execRoleId = required('TVM_EXEC_ROLE_ID')
 const adminRoleId = required('TVM_ADMIN_ROLE_ID')
 const unverifiedRoleId = process.env.TVM_UNVERIFIED_ROLE_ID?.trim()
 const alertChannelId = required('TVM_ADMIN_ALERT_CHANNEL_ID')
+const shoots = loadShootConfig()
 const base = 'https://discord.com/api/v10'
 
 async function get(path) {
@@ -27,7 +30,8 @@ async function get(path) {
     return { status: response.status, data: response.ok ? await response.json() : null }
 }
 
-function channelPermissions(channel, guild, member, roles, userId) {
+function channelPermissions(channel, guild, member, roles, userId,
+    requiredPermissions = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]) {
     const roleIds = new Set(member.roles)
     let permissions = BigInt(roles.find(role => role.id === guild.id)?.permissions || 0)
     for (const role of roles) if (roleIds.has(role.id)) permissions |= BigInt(role.permissions)
@@ -48,8 +52,7 @@ function channelPermissions(channel, guild, member, roles, userId) {
     apply(roleDeny, roleAllow)
     const user = overwrites.find(overwrite => overwrite.type === 1 && overwrite.id === userId)
     if (user) apply(BigInt(user.deny), BigInt(user.allow))
-    return Boolean(permissions & PermissionFlagsBits.ViewChannel) &&
-        Boolean(permissions & PermissionFlagsBits.SendMessages)
+    return requiredPermissions.every(permission => Boolean(permissions & permission))
 }
 
 async function main() {
@@ -95,6 +98,20 @@ async function main() {
     if (channel.data && guild.data && member?.data && roles.data) {
         check('Bot can view and send in the alert channel',
             channelPermissions(channel.data, guild.data, member.data, roles.data, bot.data.id))
+    }
+    if (shoots) {
+        const definitions = [
+            [shoots.announcementChannelId, 0, ANNOUNCEMENT_PERMISSIONS, 'Shoot announcement channel'],
+            [shoots.categoryId, 4, BOT_PERMISSIONS, 'Active shoot category'],
+            [shoots.archiveCategoryId, 4, BOT_PERMISSIONS, 'Archived shoot category']
+        ]
+        const shootChannels = await Promise.all(definitions.map(([id]) => get(`/channels/${id}`)))
+        definitions.forEach(([, type, permissions, label], index) => {
+            const data = shootChannels[index].data
+            check(`${label} exists in this server with the expected type`, data?.guild_id === guildId && data?.type === type)
+            check(`${label} grants the bot all required permissions`, Boolean(data && guild.data && member?.data && roles.data) &&
+                channelPermissions(data, guild.data, member.data, roles.data, bot.data.id, permissions))
+        })
     }
     if (checks.includes(false)) process.exitCode = 1
 }

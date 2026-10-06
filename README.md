@@ -45,6 +45,42 @@ npm run roster:check -- /path/to/eligible-members.csv
 
 The bot assigns `Unverified` to humans with no other roles. Admins can mention it in their own reminders. Codes expire after 15 minutes. Automatic role revocation is disabled by default.
 
+## Shoot workspaces
+
+TVM can create and manage private shoot chats independently of Ticket Tool. Ticket Tool can continue handling other tickets; TVM never edits its channels.
+
+To enable shoots, create one ordinary text channel for invitations, one category for active shoots, and one category for archived shoots. Set all three IDs in `.env.local` or Coolify:
+
+```dotenv
+TVM_SHOOT_ANNOUNCEMENT_CHANNEL_ID=
+TVM_SHOOT_CATEGORY_ID=
+TVM_SHOOT_ARCHIVE_CATEGORY_ID=
+```
+
+Leave all three unset to keep shoots disabled. Partial configuration is rejected. The announcement channel should be readable by eligible members and allow them to add reactions. Keep its history: reactions identify which shoot a member joins.
+
+Give the bot View Channels, Read Message History, Send Messages, Embed Links, Add Reactions, and Manage Messages in the invitation channel. In both categories it needs View Channels, Read Message History, Send Messages, Send Messages in Threads, Add Reactions, Embed Links, Attach Files, Manage Channels, Manage Permissions (Manage Roles), and **Pin Messages**. Run `npm run discord:check` and restart/redeploy to register `/shoot`. No new privileged intent or Message Content Intent is needed.
+
+All shoot commands require Discord's **Administrator** permission, including form submissions. The `Admin Team` role alone is not sufficient unless it grants that permission.
+
+| Command | Purpose |
+| --- | --- |
+| `/shoot setup [members]` | Run in any server text channel. Optionally @mention up to 70 members, then enter the shoot name, Toronto call time, and location. Creates a new private chat and shared invitation. |
+| `/shoot edit` | Update the details from inside the shoot chat; updates the pinned brief and invitation. |
+| `/shoot crew` | Privately show directly invited and reaction-joined participants. |
+| `/shoot close` | Move the chat to the archive category, preserve participant reading access, and disable posting and new joins. |
+| `/shoot reopen` | Return the chat to the active category and restore eligible members' access. |
+
+Call times use `YYYY-MM-DD HH:mm` in `America/Toronto`; Discord displays them in each viewer's local timezone. Invalid dates, daylight-saving gaps, and repeated daylight-saving times are rejected. Setup forms expire after 30 minutes; stale edit forms must be reopened.
+
+Directly invited members join immediately and their invitations cannot be edited in this release. The setup admin is the organizer and retains access. Other verified members react **🎬** on the shared invitation to join, and remove it to leave. Reacting is membership in the chat, not attendance confirmation. Bots cannot join. Eligibility uses an active roster-linked verification or Discord Administrator permission, not membership role names. It is rechecked during synchronization; an account that becomes ineligible loses participant access. The organizer retains access.
+
+TVM uses explicit channel overwrites: other members cannot see shoot chats, and category permissions are not copied. Archived chats are read-only for participants; Discord administrators can still post because Administrator bypasses overwrites. Shoot chats do not permit participant-created threads. There is a conservative maximum of 98 participants, including the organizer.
+
+Shoot state survives restarts in `tvm.db`. The bot reconciles reaction changes on startup, reconnect, and every minute, and retries interrupted creation or synchronization. Recovery markers in channel topics and message footers identify resources whose Discord response was lost; keep those markers intact. Deleted briefs/invitations are recreated without repeat invitation notifications. A deleted shoot channel is marked missing and reported to admins; it is not automatically recreated. Recovery errors appear in the existing admin alert channel and bot logs.
+
+This release includes no reminders, attendance tracking, production responsibilities, links, or shoot list command. Before enabling on the production server, verify with an admin and test members that outsiders cannot see chats, reaction joins/leaves work, direct invitations retain access, and closing produces a readable archive with posting disabled.
+
 ## Deploy
 
 Use the Dockerfile or [docker-compose.yml](docker-compose.yml) in Coolify. Set the environment variables, run one replica, and persist `/usr/app/config`. No public port is needed. Back up `tvm.db` with SQLite's backup API or `.backup`. Keep secrets and roster files out of Git.

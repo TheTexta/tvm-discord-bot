@@ -12,6 +12,7 @@ const { uiText } = require('./uiText')
 const { parseRoster } = require('./roster')
 const Store = require('./Store')
 const UnverifiedRoleManager = require('./UnverifiedRoleManager')
+const { ShootService, shootCommand, partials: shootPartials } = require('./ShootService')
 const SelfSmtpProvider = require('../mail/providers/SelfSmtpProvider')
 
 const config = loadConfig()
@@ -24,7 +25,11 @@ const mail = new SelfSmtpProvider({
     password: config.resendApiKey,
     fromAddress: config.smtpFrom
 })
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] })
+const client = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers,
+        ...(config.shoots ? [GatewayIntentBits.GuildMessageReactions] : [])],
+    partials: config.shoots ? shootPartials : []
+})
 const lastAlertAt = new Map()
 async function alertAdmins(message) {
     const now = Date.now()
@@ -68,6 +73,8 @@ const commands = [
             .addStringOption(o => o.setName('email').setDescription(uiText('commands.rosterEmail')).setRequired(true))
             .addUserOption(o => o.setName('user').setDescription(uiText('commands.newAccount')).setRequired(true)))
 ].map(command => command.toJSON())
+if (config.shoots) commands.push(shootCommand())
+const shoots = new ShootService({ client, store, config, alertAdmins })
 
 const privateReply = (interaction, content, components = []) => interaction.editReply({ content, components })
 const roleKinds = ['member', 'exec', 'admin']
@@ -375,6 +382,7 @@ client.once('clientReady', async () => {
         const unverifiedRole = await unverifiedRoles.initialize(guild)
         unverifiedReady = true
         const result = await withMembershipLock(() => reconcile(guild))
+        await shoots.initialize()
         console.log(`[TVM] Unverified role ${unverifiedRole.id}: added ${result.unverified.added}, removed ${result.unverified.removed}, failed ${result.unverified.failed}`)
         if (result.revoked) console.log(`[TVM] Reconciled ${result.revoked} removed claims`)
         setInterval(() => {
@@ -402,10 +410,19 @@ async function syncUnverifiedMember(member) {
 
 client.on('guildMemberAdd', syncUnverifiedMember)
 client.on('guildMemberUpdate', (_oldMember, member) => syncUnverifiedMember(member))
+client.on('messageReactionAdd', (reaction, user) => shoots.onReaction(reaction, user))
+client.on('messageReactionRemove', (reaction, user) => shoots.onReaction(reaction, user))
+client.on('messageReactionRemoveAll', message => shoots.onReactionClear(message))
+client.on('messageReactionRemoveEmoji', reaction => shoots.onReactionClear(reaction.message, reaction.emoji))
+client.on('shardResume', () => shoots.reconcileAll().catch(error => shoots.report('resume', error)))
+client.on('shardReady', () => {
+    if (shoots.timer) shoots.reconcileAll().catch(error => shoots.report('reconnect', error))
+})
 
 client.on('interactionCreate', async interaction => {
     if (interaction.guildId !== config.guildId) return
     try {
+        if (await shoots.handleInteraction(interaction)) return
         if (interaction.isButton()) {
             if (interaction.customId === 'tvm:verify') return await interaction.showModal(emailModal())
             if (interaction.customId === 'tvm:open-code') return await interaction.showModal(codeModal())

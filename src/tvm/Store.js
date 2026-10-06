@@ -46,12 +46,22 @@ class Store {
             CREATE TABLE IF NOT EXISTS email_admin_audit (guild_id TEXT NOT NULL, actor_id TEXT NOT NULL,
                 action TEXT NOT NULL, detail TEXT NOT NULL, at INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS idx_email_admin_audit_guild_at ON email_admin_audit(guild_id, at);
+            CREATE TABLE IF NOT EXISTS shoots (
+                id TEXT PRIMARY KEY, guild_id TEXT NOT NULL, organizer_id TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT '', call_time INTEGER, location TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'draft', channel_id TEXT UNIQUE, brief_id TEXT,
+                announcement_id TEXT UNIQUE, created_at INTEGER NOT NULL, revision INTEGER NOT NULL DEFAULT 0);
+            CREATE INDEX IF NOT EXISTS idx_shoots_guild ON shoots(guild_id);
+            CREATE TABLE IF NOT EXISTS shoot_participants (
+                shoot_id TEXT NOT NULL, user_id TEXT NOT NULL, invited INTEGER NOT NULL DEFAULT 0,
+                reacted INTEGER NOT NULL DEFAULT 0, reaction_message_id TEXT, PRIMARY KEY (shoot_id, user_id));
         `).then(async () => {
             for (const [table, column, declaration] of [
                 ['email_roster', 'role', "TEXT NOT NULL DEFAULT 'gm'"],
                 ['email_claims', 'managed_role', 'INTEGER NOT NULL DEFAULT 0'],
                 ['email_claims', 'managed_exec_role', 'INTEGER NOT NULL DEFAULT 0'],
-                ['email_claims', 'managed_admin_role', 'INTEGER NOT NULL DEFAULT 0']
+                ['email_claims', 'managed_admin_role', 'INTEGER NOT NULL DEFAULT 0'],
+                ['shoot_participants', 'reaction_message_id', 'TEXT']
             ]) {
                 const columns = await this._all(`PRAGMA table_info(${table})`)
                 if (!columns.some(item => item.name === column)) await this._exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`)
@@ -356,6 +366,49 @@ class Store {
             await this._run('DELETE FROM email_send_events WHERE at < ?', [now - 86400000])
             await this._run('DELETE FROM email_admin_audit WHERE at < ?', [now - 365 * 86400000])
         })
+    }
+    createShootDraft(id, guildId, organizerId, invitedIds) {
+        return this._locked(async () => {
+            await this._exec('BEGIN IMMEDIATE')
+            try {
+                await this._run('INSERT INTO shoots (id, guild_id, organizer_id, created_at) VALUES (?, ?, ?, ?)',
+                    [id, guildId, organizerId, Date.now()])
+                for (const userId of new Set([organizerId, ...invitedIds])) {
+                    await this._run('INSERT INTO shoot_participants (shoot_id, user_id, invited) VALUES (?, ?, 1)', [id, userId])
+                }
+                await this._exec('COMMIT')
+            } catch (error) {
+                await this._exec('ROLLBACK').catch(() => {})
+                throw error
+            }
+        })
+    }
+    getShoot(id, guildId) {
+        return this._locked(() => this._get('SELECT * FROM shoots WHERE id = ? AND guild_id = ?', [id, guildId]))
+    }
+    shootForChannel(guildId, channelId) {
+        return this._locked(() => this._get('SELECT * FROM shoots WHERE guild_id = ? AND channel_id = ?', [guildId, channelId]))
+    }
+    shootForAnnouncement(guildId, messageId) {
+        return this._locked(() => this._get('SELECT * FROM shoots WHERE guild_id = ? AND announcement_id = ?', [guildId, messageId]))
+    }
+    allShoots(guildId) {
+        return this._locked(() => this._all("SELECT * FROM shoots WHERE guild_id = ? AND status != 'draft'", [guildId]))
+    }
+    updateShoot(id, values) {
+        const allowed = ['name', 'call_time', 'location', 'status', 'channel_id', 'brief_id', 'announcement_id']
+        const keys = Object.keys(values)
+        if (!keys.length || keys.some(key => !allowed.includes(key))) throw new Error('Invalid shoot update')
+        return this._locked(() => this._run(`UPDATE shoots SET ${keys.map(key => `${key} = ?`).join(', ')},
+            revision = revision + 1 WHERE id = ?`, [...keys.map(key => values[key]), id]))
+    }
+    shootParticipants(id) {
+        return this._locked(() => this._all('SELECT * FROM shoot_participants WHERE shoot_id = ? ORDER BY user_id', [id]))
+    }
+    setShootReaction(id, userId, reacted, messageId = null) {
+        return this._locked(() => this._run(`INSERT INTO shoot_participants (shoot_id, user_id, reacted, reaction_message_id) VALUES (?, ?, ?, ?)
+            ON CONFLICT(shoot_id, user_id) DO UPDATE SET reacted = excluded.reacted, reaction_message_id = excluded.reaction_message_id`,
+            [id, userId, reacted ? 1 : 0, messageId]))
     }
     close() { return new Promise((resolve, reject) => this.db.close(error => error ? reject(error) : resolve())) }
 }
