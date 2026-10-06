@@ -10,6 +10,8 @@ For local Compose:
 docker compose --env-file .env.local up --build -d
 ```
 
+In Coolify, enable **consistent container names** and set the stop grace period to **30 seconds** so deployments stop the previous bot before starting its replacement. Keep one application and one replica.
+
 Before an upgrade, take a SQLite backup and confirm the test and container checks pass. Stop the old bot before starting its replacement: process-local locks cannot coordinate overlapping replicas. Shutdown drains accepted work with a 25-second deadline; allow at least 30 seconds before killing the container.
 
 After deployment, run `npm run discord:check`, inspect the startup log and private alert channel, and confirm `/source` points to the deployed public repository. In a controlled test server, verify roster-based access, release/transfer, reaction joining, private shoot visibility, and read-only archival. Avoid manipulating production members to perform smoke tests.
