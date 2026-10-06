@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 'use strict'
 
-const { uiText } = require('./uiText')
+const { uiText } = require('../shared/uiText')
 
 const { parse } = require('csv-parse/sync')
-const { normalizeEmail, validEmail } = require('./validation')
+const { normalizeEmail, validEmail } = require('../shared/validation')
 const { parseRole } = require('./roles')
 
 function parseRoster(csv) {

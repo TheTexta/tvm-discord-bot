@@ -86,6 +86,11 @@ const migrations = [
         name: 'durable-announcement-republication',
         apply: (store) =>
             addColumns(store, [['shoots', 'announcement_republish_pending', 'INTEGER NOT NULL DEFAULT 0']])
+    },
+    {
+        version: 7,
+        name: 'authoritative-roster-snapshots',
+        apply: (store) => addColumns(store, [['email_roster_meta', 'authoritative', 'INTEGER NOT NULL DEFAULT 0']])
     }
 ]
 

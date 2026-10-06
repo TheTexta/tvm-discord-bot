@@ -19,7 +19,7 @@ npm start
 
 `npm start` loads `.env.local` when present; exported environment variables take precedence. The local database defaults to `./config/tvm.db`. Containers persist `/usr/app/config/tvm.db`. Run one replica.
 
-Startup validates configuration, editable messages, roles, and channel permissions. Commands become available after initialization; `/source` remains available while starting.
+Startup validates configuration, editable messages, roles, channel permissions, and administrator alert-channel privacy. Commands become available after initialization; `/source` remains available while starting.
 
 ## Membership
 
@@ -31,7 +31,9 @@ Upload a CSV with `Email,Role` headers. Accepted roles are `GM`, `Exec - Editor`
 npm run roster:check -- /path/to/eligible-members.csv
 ```
 
-Uploads add members and update included tiers; omitted emails remain active. Automatic role revocation is disabled by default, and pre-existing roles remain outside the bot’s ownership. `Unverified` is assigned only to humans with no other roles.
+Each accepted upload replaces the complete active roster. Omitted emails lose roster eligibility; changed tiers remove obsolete bot-owned roles. Roles assigned before bot management remain protected independently for GM, Exec, and Admin. Inactive account links are retained, so a returning email automatically regains its current tier without another verification challenge. The retired `TVM_AUTO_ROLE_REVOCATION` setting is ignored. `Unverified` is assigned only to humans with no other roles.
+
+Existing databases start in transition mode: their merged roster and existing roles are preserved until the first complete CSV upload. `/roster status` shows whether snapshot control is active. Back up before upgrading, then upload the complete current roster. Upload replies confirm database acceptance; Discord synchronization runs in the background and reports progress, protected roles, and failures through `/roster status`. Invalid uploads leave the active snapshot unchanged.
 
 ## Common commands
 

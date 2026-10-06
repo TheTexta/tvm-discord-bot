@@ -3,8 +3,8 @@
 
 const crypto = require('node:crypto')
 const { MessageFlags } = require('discord.js')
-const { uiText } = require('./uiText')
-const { normalizeEmail, validEmail } = require('./validation')
+const { uiText } = require('../shared/uiText')
+const { normalizeEmail, validEmail } = require('../shared/validation')
 const { codeRow } = require('./verificationUi')
 
 function createVerificationService({
@@ -18,7 +18,7 @@ function createVerificationService({
     logger
 }) {
     const verificationQueues = new Map()
-    const { existingRoles, roleSummary, addMissingRoles } = membership
+    const { roleSummary, addMissingRoles } = membership
     function withVerificationLock(userId, work) {
         const previous = verificationQueues.get(userId) || Promise.resolve()
         const next = previous.catch(() => {}).then(work)
@@ -39,14 +39,15 @@ function createVerificationService({
                     subject: uiText('email.codeSubject'),
                     text: uiText('email.codeBody', { code: prepared.code })
                 })
-                await privateReply(interaction, uiText('verification.codeSent'), [codeRow()])
             } catch (error) {
                 // An SMTP response can be lost after delivery. Keep the short-lived
                 // challenge usable; the rate and attempt limits still apply.
                 logger.error('[TVM] Verification email failed:', error?.message || error)
                 await alertAdmins(uiText('alerts.emailFailed'))
                 await privateReply(interaction, uiText('verification.emailFailed'))
+                return
             }
+            await privateReply(interaction, uiText('verification.codeSent'), [codeRow()])
         })
     }
 
@@ -86,7 +87,7 @@ function createVerificationService({
         }
         await withMembershipLock(async () => {
             const member = await interaction.guild.members.fetch({ user: interaction.user.id, force: true })
-            const result = await store.verifyAndClaim(config.guildId, interaction.user.id, code, existingRoles(member))
+            const result = await store.verifyAndClaim(config.guildId, interaction.user.id, code)
             if (!result.ok) {
                 const message =
                     result.reason === 'claimed'

@@ -3,10 +3,10 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { createApp } = require('../src/tvm/App')
+const { createApp } = require('../src/app/App')
 const { prepareClient } = require('./helpers/runtime')
 const discord = require('discord.js')
-const { canManageBot } = require('../src/tvm/permissions')
+const { canManageBot } = require('../src/shared/permissions')
 
 const adminRoleId = '100000000000000012'
 const guildId = '100000000000000001'
@@ -28,6 +28,9 @@ async function runtime(t) {
         }
         async claimFor() {
             return null
+        }
+        async removedClaims() {
+            return []
         }
         async activeClaims() {
             return []

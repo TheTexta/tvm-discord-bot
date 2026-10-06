@@ -27,7 +27,7 @@ The complete source of the running bot is public at [TheTexta/tvm-discord-bot](h
 3. Limit requests per Discord account and submitted email and cap server-wide sends. Store short-lived rate-limit keys as HMACs instead of raw submitted addresses.
 4. If the email is active, send a six-digit code to that same address. Bind its HMAC to the Discord account, server, email, and roster version. Expire it after 15 minutes and allow at most five attempts.
 5. Recheck the active roster and account claim before granting General Member and the matching Exec or Admin role. One roster email can be claimed by one Discord account, and one account can claim one roster email. Only administrators can release or transfer claims.
-6. On roster upload, add new email entries and update included role tiers without removing omitted emails or existing Discord roles. Reconcile missing role grants at startup and hourly. Automatic revocation stays disabled while the roster is incomplete; explicit administrator release and transfer actions still work.
+6. Each complete roster upload replaces eligibility and tiers. Reconcile only bot-owned roles; preserve external roles and inactive identity links. Legacy merged rosters transition on the first complete upload. Explicit administrator release and transfer actions still work.
 7. Administrators can upload a CSV with `/upload`. Google Sheet edits require an upload until an authenticated sheet sync is configured.
 
 ## Deployment and rollout
@@ -47,7 +47,7 @@ The complete source of the running bot is public at [TheTexta/tvm-discord-bot](h
 | Email absent from roster | No code sent and no role granted; generic private response |
 | Wrong, expired, reused, or stale-version code | Rejected |
 | Second Discord account uses a claimed email | Administrator transfer required |
-| Email omitted from an upload or tier downgraded | Existing access and Discord roles remain while automatic revocation is disabled |
+| Email omitted from an upload or tier downgraded | Roster eligibility is removed or updated; bot-owned obsolete roles are removed and external roles preserved |
 | Invalid or empty roster upload | Previous active roster remains intact |
 | SMTP or Discord role error | No false success; administrator alerted |
 | Restart, redeploy, and backup restore | Roster and claims remain consistent |

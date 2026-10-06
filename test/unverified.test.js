@@ -4,8 +4,8 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const { Collection, PermissionFlagsBits } = require('discord.js')
-const UnverifiedRoleManager = require('../src/tvm/UnverifiedRoleManager')
-const { uiText } = require('../src/tvm/uiText')
+const UnverifiedRoleManager = require('../src/membership/UnverifiedRoleManager')
+const { uiText } = require('../src/shared/uiText')
 
 function fixture() {
     const manager = new UnverifiedRoleManager('guild', 'unverified', ['member', 'exec', 'admin'])

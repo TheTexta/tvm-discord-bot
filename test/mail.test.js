@@ -5,7 +5,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const net = require('node:net')
 const { once } = require('node:events')
-const SelfSmtpProvider = require('../src/mail/providers/SelfSmtpProvider')
+const SelfSmtpProvider = require('../src/infrastructure/mail/SelfSmtpProvider')
 
 test('SMTP delivery times out when a server accepts connections but never greets', { timeout: 2000 }, async (t) => {
     const connections = new Set()

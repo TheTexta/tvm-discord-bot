@@ -9,7 +9,7 @@ const {
     ButtonBuilder,
     ButtonStyle
 } = require('discord.js')
-const { uiText } = require('./uiText')
+const { uiText } = require('../shared/uiText')
 
 const codeRow = () =>
     new ActionRowBuilder().addComponents(

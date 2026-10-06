@@ -2,7 +2,7 @@
 'use strict'
 
 const fs = require('node:fs')
-const { parseRoster } = require('../src/tvm/roster')
+const { parseRoster } = require('../src/membership/roster')
 
 const filename = process.argv[2]
 if (!filename) {

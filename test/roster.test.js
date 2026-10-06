@@ -3,8 +3,8 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { parseRoster } = require('../src/tvm/roster')
-const { uiText } = require('../src/tvm/uiText')
+const { parseRoster } = require('../src/membership/roster')
+const { uiText } = require('../src/shared/uiText')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')

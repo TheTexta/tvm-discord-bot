@@ -10,7 +10,7 @@ const {
     LabelBuilder,
     StringSelectMenuBuilder
 } = require('discord.js')
-const { uiText } = require('../uiText')
+const { uiText } = require('../shared/uiText')
 const { JOIN_PERIODS, PERIOD_TEXT } = require('./policy')
 const ZONE = 'America/Toronto'
 const FORMAT = 'yyyy-MM-dd HH:mm'

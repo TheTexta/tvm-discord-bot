@@ -5,7 +5,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
-const { uiText, createTextRenderer } = require('../src/tvm/uiText')
+const { uiText, createTextRenderer } = require('../src/shared/uiText')
 
 test('renders codes and account mentions while treating inserted text literally', () => {
     // Exercise the formatter with fixed templates, independent of admin-edited copy.
@@ -23,10 +23,12 @@ test('renders codes and account mentions while treating inserted text literally'
 })
 
 test('runtime text references exist in the config', () => {
-    const directory = path.join(__dirname, '../src/tvm')
+    const directory = path.join(__dirname, '../src')
+    let references = 0
     for (const filename of fs.readdirSync(directory, { recursive: true }).filter((name) => name.endsWith('.js'))) {
         const source = fs.readFileSync(path.join(directory, filename), 'utf8')
         for (const [, key] of source.matchAll(/uiText\('([^']+)'/g)) {
+            references++
             const template = key.split('.').reduce((value, part) => value?.[part], require('../ui-text.json'))
             assert.equal(typeof template, 'string', `${filename}: ${key}`)
             const values = Object.fromEntries(
@@ -35,10 +37,11 @@ test('runtime text references exist in the config', () => {
             assert.equal(typeof uiText(key, values), 'string')
         }
     }
+    assert.ok(references > 30, 'Scan must cover the active runtime modules')
 })
 
 test('editable text validates missing keys, placeholders and component limits with named errors', () => {
-    const { validateUiText } = require('../src/tvm/uiText')
+    const { validateUiText } = require('../src/shared/uiText')
     const text = require('../ui-text.json')
     assert.equal(validateUiText(text), text)
     for (const [key, value, pattern] of [
@@ -58,8 +61,8 @@ test('editable text validates missing keys, placeholders and component limits wi
 })
 
 test('recovery identifiers retain the deployed format and do not depend on editable copy', () => {
-    const { shootMarker, shootTopic } = require('../src/tvm/shoot/identifiers')
-    const { renderShoot } = require('../src/tvm/shoot/render')
+    const { shootMarker, shootTopic } = require('../src/shoots/identifiers')
+    const { renderShoot } = require('../src/shoots/render')
     assert.equal(shootTopic('abc'), 'TVM shoot abc')
     assert.equal(shootMarker('abc', 'brief'), 'TVM shoot abc · brief')
     const shoot = {

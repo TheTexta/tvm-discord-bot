@@ -60,8 +60,8 @@
     },
     "admin": {
         "permissionRequired": "You'll need the Admin Team role or Discord Administrator permission to use this command.",
-        "uploadComplete": "Uploaded {uploaded} rows! The active member list now has {count} emails (version {version}). Existing roles were kept. Membership links needing a role sync retry: {failed}.",
-        "status": "Active member list: {count} members (version {version}). Removals still needing reconciliation: {unreconciled}.",
+        "uploadComplete": "Accepted roster snapshot v{version}: {count} emails ({uploaded} rows). Added: {added}; omitted: {omitted}; tier changes: {changed}. Discord synchronization is queued; use /roster status for progress. Pre-existing roles are protected.",
+        "status": "Active roster: {count} emails (version {version}). {mode}\nInactive links: {unreconciled}.\nSynchronization: {sync}\nHealth: {health}",
         "noRoster": "There's no active TVM member list yet. Verification is closed.",
         "auditEntry": "{timestamp} • {action} • by {actor} • {detail}",
         "noAudit": "No member list updates or account transfers recorded yet.",
@@ -70,7 +70,9 @@
         "released": "Unlinked the verified membership for <@{userId}>. They can verify again if they're on the active member list.",
         "transferred": "Transferred the verified membership to <@{userId}>!",
         "testmailSent": "SMTP accepted the test email! Check the recipient's inbox and junk folder to confirm it arrived.",
-        "operationFailed": "Couldn't complete that action: {error}"
+        "operationFailed": "Couldn't complete that action: {error}",
+        "snapshotActive": "Latest CSV controls bot-owned roles.",
+        "snapshotPending": "Upload a complete CSV to activate snapshot control. Existing merged data and roles are preserved until then."
     },
     "auditActions": {
         "roster_replace": "Member list replaced",
@@ -188,6 +190,8 @@
         "unscheduled": "Unscheduled",
         "expiredInvitation": "Reaction joining has expired. The shoot chat remains open; ask an admin to add you with /shoot add. Existing members can remove their reaction to leave.",
         "joinUnavailable": "Announcement removed; ask an admin to add members with /shoot add.",
-        "formerMember": "Former member ({userId})"
+        "formerMember": "Former member ({userId})",
+        "formReady": "Your form is ready. Open it below to continue.",
+        "openForm": "Open form"
     }
 }

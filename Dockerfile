@@ -23,4 +23,5 @@ COPY --chown=node:node src ./src
 COPY --chown=node:node scripts ./scripts
 
 USER node
-CMD ["node", "src/tvm/index.js"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 CMD ["node", "scripts/check-health.js"]
+CMD ["node", "src/app/index.js"]

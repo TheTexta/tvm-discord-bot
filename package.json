@@ -2,9 +2,9 @@
     "name": "tvm-discord-bot",
     "version": "1.0.0",
     "description": "TVM Discord bot for roster-based membership verification and private shoot workspaces",
-    "main": "src/tvm/App.js",
+    "main": "src/app/App.js",
     "scripts": {
-        "start": "node --env-file-if-exists=.env.local src/tvm/index.js",
+        "start": "node --env-file-if-exists=.env.local src/app/index.js",
         "test": "node --test test/*.test.js",
         "roster:check": "node scripts/check-roster.js",
         "discord:check": "node --env-file=.env.local scripts/check-discord.js",

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 'use strict'
 
-const { required, boolean, validEmail, validSnowflake } = require('./validation')
+const { required, validEmail, validSnowflake } = require('../shared/validation')
 
 function loadShootConfig(env = process.env) {
     const names = ['TVM_SHOOT_ANNOUNCEMENT_CHANNEL_ID', 'TVM_SHOOT_CATEGORY_ID', 'TVM_SHOOT_ARCHIVE_CATEGORY_ID']
@@ -28,7 +28,6 @@ function loadConfig(env = process.env) {
         alertChannelId: required(env, 'TVM_ADMIN_ALERT_CHANNEL_ID'),
         smtpFrom: required(env, 'SMTP_FROM'),
         resendApiKey: required(env, 'RESEND_API_KEY'),
-        autoRoleRevocation: boolean(env, 'TVM_AUTO_ROLE_REVOCATION'),
         smtpHost: env.SMTP_HOST || 'smtp.resend.com',
         smtpPort: Number(env.SMTP_PORT || 465),
         shoots: loadShootConfig(env)

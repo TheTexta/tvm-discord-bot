@@ -3,7 +3,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { loadConfig, loadRosterConfig } = require('../src/tvm/config')
+const { loadConfig, loadRosterConfig } = require('../src/app/config')
 
 const env = {
     DISCORD_BOT_TOKEN: 'test-token',
@@ -18,12 +18,9 @@ const env = {
     VERIFICATION_CODE_SECRET: 's'.repeat(32)
 }
 
-test('configuration uses injected environment, validates booleans, and rejects unsafe IDs', () => {
-    assert.equal(loadConfig(env).autoRoleRevocation, false)
-    assert.equal(loadConfig({ ...env, TVM_AUTO_ROLE_REVOCATION: ' true ' }).autoRoleRevocation, true)
-    assert.equal(loadConfig({ ...env, TVM_AUTO_ROLE_REVOCATION: 'false' }).autoRoleRevocation, false)
-    for (const value of ['TRUE', 'yes', '0', 'tru']) {
-        assert.throws(() => loadConfig({ ...env, TVM_AUTO_ROLE_REVOCATION: value }), /must be true or false/)
+test('configuration uses injected environment, ignores retired revocation settings, and rejects unsafe IDs', () => {
+    for (const value of ['true', 'false', 'yes']) {
+        assert.equal(loadConfig({ ...env, TVM_AUTO_ROLE_REVOCATION: value }).autoRoleRevocation, undefined)
     }
     assert.throws(() => loadConfig({ ...env, DISCORD_BOT_TOKEN: ' ' }), /Missing required/)
     assert.throws(() => loadConfig({ ...env, TVM_MEMBER_ROLE_ID: 'invalid' }), /Invalid/)

@@ -17,6 +17,7 @@ const text = require('../../ui-text.json')
 const schema = require('./uiTextSchema.json')
 
 const shootLimits = {
+    openForm: 80,
     command: 100,
     setup: 100,
     edit: 100,

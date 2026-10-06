@@ -2,7 +2,7 @@
 'use strict'
 
 const { EmbedBuilder, escapeMarkdown } = require('discord.js')
-const { uiText } = require('../uiText')
+const { uiText } = require('../shared/uiText')
 const { shootMarker } = require('./identifiers')
 const { joinDeadline, PERIOD_TEXT, noMentions } = require('./policy')
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 'use strict'
 
-const { uiText } = require('./uiText')
+const { uiText } = require('../shared/uiText')
 
 const { PermissionFlagsBits } = require('discord.js')
 
@@ -71,13 +71,13 @@ class UnverifiedRoleManager {
         return 'added'
     }
 
-    async syncGuild(guild) {
+    async syncGuild(guild, withLock = (work) => work()) {
         const result = { added: 0, removed: 0, failed: 0 }
         if (guild.id !== this.guildId) return result
         const members = await guild.members.fetch()
         for (const member of members.values()) {
             try {
-                const action = await this.syncMember(member)
+                const action = await withLock(() => this.syncMember(member))
                 if (action) result[action]++
             } catch (error) {
                 console.error('[TVM] Unverified role sync failed:', error?.message || error)

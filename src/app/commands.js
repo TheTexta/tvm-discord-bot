@@ -2,8 +2,8 @@
 'use strict'
 
 const { SlashCommandBuilder } = require('discord.js')
-const { uiText } = require('./uiText')
-const { shootCommand } = require('./shoot/forms')
+const { uiText } = require('../shared/uiText')
+const { shootCommand } = require('../shoots/forms')
 
 function buildCommands(shootsEnabled) {
     const commands = [

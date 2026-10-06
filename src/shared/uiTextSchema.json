@@ -47,8 +47,8 @@
     "email.testSubject": [],
     "email.testBody": [],
     "admin.permissionRequired": [],
-    "admin.uploadComplete": ["count", "failed", "uploaded", "version"],
-    "admin.status": ["count", "unreconciled", "version"],
+    "admin.uploadComplete": ["added", "changed", "count", "omitted", "uploaded", "version"],
+    "admin.status": ["count", "health", "mode", "sync", "unreconciled", "version"],
     "admin.noRoster": [],
     "admin.auditEntry": ["action", "actor", "detail", "timestamp"],
     "admin.noAudit": [],
@@ -165,5 +165,9 @@
     "shoot.unscheduled": [],
     "shoot.expiredInvitation": [],
     "shoot.joinUnavailable": [],
-    "shoot.formerMember": ["userId"]
+    "shoot.formerMember": ["userId"],
+    "admin.snapshotActive": [],
+    "admin.snapshotPending": [],
+    "shoot.formReady": [],
+    "shoot.openForm": []
 }

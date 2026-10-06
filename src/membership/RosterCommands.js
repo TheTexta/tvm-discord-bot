@@ -2,9 +2,9 @@
 'use strict'
 
 const { MessageFlags } = require('discord.js')
-const { uiText } = require('./uiText')
+const { uiText } = require('../shared/uiText')
 const { parseRoster } = require('./roster')
-const { normalizeEmail, validEmail, validSnowflake } = require('./validation')
+const { normalizeEmail, validEmail, validSnowflake } = require('../shared/validation')
 const { roleKinds, managedColumns } = require('./roles')
 
 function createRosterCommands({
@@ -14,21 +14,34 @@ function createRosterCommands({
     membership,
     privateReply,
     unverifiedRoles,
-    alertAdmins
+    alertAdmins,
+    scheduleReconciliation = (guild) => membership.reconcile(guild),
+    healthStatus = () => ({})
 }) {
-    const { roleIds, existingRoles, roleSummary, addMissingRoles, removeManagedRoles, reconcile } = membership
-    async function uploadRoster(interaction) {
-        const attachment = interaction.options.getAttachment('csv')
-        if (!attachment || attachment.size > 2 * 1024 * 1024) throw new Error(uiText('errors.csvSize'))
-        const response = await fetch(attachment.url, { signal: AbortSignal.timeout(15000) })
-        if (!response.ok) throw new Error(uiText('errors.csvDownload'))
-        const rows = parseRoster(await response.text())
-        const outcome = await withMembershipLock(async () => {
-            const imported = await store.mergeRoster(config.guildId, rows, interaction.user.id)
-            const reconciliation = await reconcile(interaction.guild)
-            return { ...imported, ...reconciliation }
-        })
-        await privateReply(interaction, uiText('admin.uploadComplete', outcome))
+    const { roleIds, roleSummary, addMissingRoles, removeManagedRoles } = membership
+    let uploads = Promise.resolve()
+    function uploadRoster(interaction) {
+        // Reserve arrival order before waiting for Discord's acknowledgement response.
+        const acknowledged = Promise.resolve().then(() => interaction.deferReply({ flags: MessageFlags.Ephemeral }))
+        acknowledged.catch(() => {})
+        // Queue the full preparation/commit in arrival order, independent of membership I/O.
+        const next = uploads
+            .catch(() => {})
+            .then(async () => {
+                await acknowledged
+                const attachment = interaction.options.getAttachment('csv')
+                if (!attachment || attachment.size > 2 * 1024 * 1024) throw new Error(uiText('errors.csvSize'))
+                const response = await fetch(attachment.url, { signal: AbortSignal.timeout(15000) })
+                if (!response.ok) throw new Error(uiText('errors.csvDownload'))
+                const rows = parseRoster(await response.text())
+                const outcome = await withMembershipLock(() =>
+                    store.replaceRoster(config.guildId, rows, interaction.user.id)
+                )
+                scheduleReconciliation(interaction.guild).catch(() => {})
+                await privateReply(interaction, uiText('admin.uploadComplete', outcome))
+            })
+        uploads = next
+        return next
     }
 
     async function handleRoster(interaction) {
@@ -42,7 +55,12 @@ function createRosterCommands({
                     ? uiText('admin.status', {
                           count: status.count,
                           version: status.meta.version,
-                          unreconciled: status.unreconciled
+                          unreconciled: status.unreconciled,
+                          mode: status.meta.authoritative
+                              ? uiText('admin.snapshotActive')
+                              : uiText('admin.snapshotPending'),
+                          sync: JSON.stringify(membership.status?.() || {}),
+                          health: JSON.stringify(healthStatus())
                       })
                     : uiText('admin.noRoster')
             )
@@ -69,7 +87,7 @@ function createRosterCommands({
             return
         }
         if (subcommand === 'reconcile') {
-            const result = await withMembershipLock(() => reconcile(interaction.guild))
+            const result = await scheduleReconciliation(interaction.guild)
             await privateReply(
                 interaction,
                 uiText('admin.reconciled', {
@@ -116,6 +134,7 @@ function createRosterCommands({
                     await unverifiedRoles.syncMember(
                         await interaction.guild.members.fetch({ user: member.id, force: true })
                     )
+                scheduleReconciliation(interaction.guild).catch(() => {})
                 await privateReply(interaction, uiText('admin.released', { userId: claim.user_id }))
             })
             return
@@ -159,13 +178,7 @@ function createRosterCommands({
                     throw error
                 }
                 try {
-                    await store.transfer(
-                        config.guildId,
-                        email,
-                        target.id,
-                        interaction.user.id,
-                        existingRoles(targetMember)
-                    )
+                    await store.transfer(config.guildId, email, target.id, interaction.user.id)
                 } catch (error) {
                     await restoreOldRoles()
                     throw error
@@ -180,6 +193,7 @@ function createRosterCommands({
                     await alertAdmins(uiText('alerts.transferFailed'))
                     throw new Error(uiText('errors.transferRoleFailed'), { cause: error })
                 }
+                scheduleReconciliation(interaction.guild).catch(() => {})
                 await privateReply(interaction, uiText('admin.transferred', { userId: target.id }))
             })
         }

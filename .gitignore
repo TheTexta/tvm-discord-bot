@@ -22,3 +22,6 @@ config/ServerStatsHistory.log
 site
 .playwright-mcp
 *.pyc
+
+*.health.json
+*.health.json.*.tmp

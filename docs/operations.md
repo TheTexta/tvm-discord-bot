@@ -16,6 +16,22 @@ Before an upgrade, take a SQLite backup and confirm the test and container check
 
 After deployment, run `npm run discord:check`, inspect the startup log and private alert channel, and confirm `/source` points to the deployed public repository. In a controlled test server, verify roster-based access, release/transfer, reaction joining, private shoot visibility, and read-only archival. Avoid manipulating production members to perform smoke tests.
 
+## Activating authoritative roster control
+
+Migration 7 preserves existing roster entries, identity links, and each role ownership flag, and marks merged rosters as awaiting their first authoritative snapshot. No role removals occur during this transition. The database does not contain historical CSV contents and cannot reconstruct the last uploaded file.
+
+Back up first, deploy one replica, and upload the complete current roster. The accepted CSV activates snapshot control: omitted emails become ineligible immediately, and background synchronization removes only bot-owned roles. Tier changes remove bot-owned obsolete Exec/Admin roles. Externally assigned roles remain untouched, including on verified accounts. An inactive email keeps its account link and automatically regains the latest tier if it returns. `/roster release` intentionally unlinks an account; it does not remove email eligibility from the CSV. Offboarding is performed by omission from the next snapshot.
+
+`TVM_AUTO_ROLE_REVOCATION` is retired and ignored, including existing `false` values. Admin Team and Discord Administrator authority remain available for externally assigned roles, and shoot organizers retain their existing access exception. Do not treat CSV omission as removal of those protected privileges.
+
+## Health and monitoring
+
+`/roster status` reports snapshot mode/version, inactive links, reconciliation progress, protected roles, failures, and health timestamps. Reconciliation emits aggregate JSON summaries without member data. An upload reply confirms database acceptance and queued synchronization; inspect status for completion.
+
+The bot writes a mode-0600 heartbeat beside its database every 15 seconds (`tvm.db.health.json`). The Docker healthcheck requires a heartbeat younger than 60 seconds, a ready Discord connection, successful membership reconciliation within two hours, and, when enabled, successful shoot reconciliation within five minutes. It uses no public HTTP endpoint. Container health reports degradation; Docker's restart policy alone does not restart an unhealthy running container, so configure monitoring alerts in your hosting platform. Failed Discord writes retain ownership for retry.
+
+The alert channel must be a server text channel readable only by the bot, configured Admin Team, server owner, or Discord administrators. Startup and `discord:check` reject ordinary role/member access. Tighten channel overwrites before upgrading if necessary.
+
 ## Backup and restore
 
 Use SQLite’s backup API or `.backup`; copying only a live main database can omit committed data from its WAL file. For the Compose service:
@@ -33,7 +49,7 @@ For production restoration, stop the bot, preserve the current database for inve
 
 ## Maintenance scripts
 
-`roster:check` is read-only and can run while the bot is active. **Stop the bot before running database-writing scripts**, including `import-initial-roster.js` and `update-roster-roles.js`. Their database connections do not participate in the runtime’s membership lock. Back up first, supply the expected row count, then restart and reconcile. Use `/upload` for normal additive roster updates.
+`roster:check` is read-only and can run while the bot is active. **Stop the bot before running database-writing scripts**, including `import-initial-roster.js` and `update-roster-roles.js`. Their database connections do not participate in the runtime’s membership lock. Back up first, supply the expected row count, then restart and reconcile. Use `/upload` with the **complete current roster** for normal updates. Uploads are processed in arrival order; each valid snapshot replaces all earlier roster data. Invalid uploads do not change eligibility.
 
 ## Secret rotation
 

@@ -2,9 +2,9 @@
 'use strict'
 
 const fs = require('node:fs')
-const { parseRoster } = require('../src/tvm/roster')
-const Store = require('../src/tvm/Store')
-const { loadRosterConfig } = require('../src/tvm/config')
+const { parseRoster } = require('../src/membership/roster')
+const Store = require('../src/infrastructure/Store')
+const { loadRosterConfig } = require('../src/app/config')
 
 const filename = process.argv[2]
 const expectedCount = Number(process.argv[3])
@@ -20,7 +20,7 @@ async function main() {
     const store = new Store(databasePath, codeSecret)
     try {
         const status = await store.status(guildId)
-        if (status.meta) throw new Error('An active roster already exists; use /upload to merge roster changes')
+        if (status.meta) throw new Error('An active roster already exists; use /upload to replace the complete roster')
         const result = await store.replaceRoster(guildId, rows, 'system:initial-import')
         console.log(`Initial email roster imported: ${result.count} entries, version ${result.version}`)
     } finally {

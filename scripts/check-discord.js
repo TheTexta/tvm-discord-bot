@@ -2,10 +2,11 @@
 'use strict'
 
 const { ApplicationFlagsBitField, PermissionFlagsBits } = require('discord.js')
-const { loadShootConfig } = require('../src/tvm/config')
-const { BOT_PERMISSIONS, ANNOUNCEMENT_PERMISSIONS } = require('../src/tvm/shoot/policy')
-const { required: requireValue } = require('../src/tvm/validation')
-const { uiText } = require('../src/tvm/uiText')
+const { loadShootConfig } = require('../src/app/config')
+const { BOT_PERMISSIONS, ANNOUNCEMENT_PERMISSIONS } = require('../src/shoots/policy')
+const { required: requireValue } = require('../src/shared/validation')
+const { channelPermissions, assertPrivateAlertChannel } = require('../src/shared/channelPermissions')
+const { uiText } = require('../src/shared/uiText')
 
 const required = (name) => requireValue(process.env, name)
 
@@ -26,39 +27,6 @@ async function get(path) {
         signal: AbortSignal.timeout(12000)
     })
     return { status: response.status, data: response.ok ? await response.json() : null }
-}
-
-function channelPermissions(
-    channel,
-    guild,
-    member,
-    roles,
-    userId,
-    requiredPermissions = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages]
-) {
-    const roleIds = new Set(member.roles)
-    let permissions = BigInt(roles.find((role) => role.id === guild.id)?.permissions || 0)
-    for (const role of roles) if (roleIds.has(role.id)) permissions |= BigInt(role.permissions)
-    if (permissions & PermissionFlagsBits.Administrator) return true
-
-    const overwrites = channel.permission_overwrites || []
-    const apply = (deny, allow) => {
-        permissions = (permissions & ~deny) | allow
-    }
-    const everyone = overwrites.find((overwrite) => overwrite.id === guild.id)
-    if (everyone) apply(BigInt(everyone.deny), BigInt(everyone.allow))
-    let roleDeny = 0n
-    let roleAllow = 0n
-    for (const overwrite of overwrites) {
-        if (overwrite.type === 0 && roleIds.has(overwrite.id)) {
-            roleDeny |= BigInt(overwrite.deny)
-            roleAllow |= BigInt(overwrite.allow)
-        }
-    }
-    apply(roleDeny, roleAllow)
-    const user = overwrites.find((overwrite) => overwrite.type === 1 && overwrite.id === userId)
-    if (user) apply(BigInt(user.deny), BigInt(user.allow))
-    return requiredPermissions.every((permission) => Boolean(permissions & permission))
 }
 
 async function main() {
@@ -117,6 +85,21 @@ async function main() {
             'Bot can view and send in the alert channel',
             channelPermissions(channel.data, guild.data, member.data, roles.data, bot.data.id)
         )
+    }
+    if (channel.data && guild.data && roles.data && bot.data) {
+        try {
+            await assertPrivateAlertChannel({
+                channel: channel.data,
+                guild: guild.data,
+                roles: roles.data,
+                botId: bot.data.id,
+                adminRoleId,
+                fetchMember: async (id) => (await get(`/guilds/${guildId}/members/${id}`)).data
+            })
+            check('Administrator alert channel is private', true)
+        } catch (error) {
+            check(error.message, false)
+        }
     }
     if (shoots) {
         const definitions = [

@@ -9,8 +9,8 @@ const os = require('node:os')
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 const { PermissionsBitField, PermissionFlagsBits } = require('discord.js')
-const { createApp } = require('../src/tvm/App')
-const Store = require('../src/tvm/Store')
+const { createApp } = require('../src/app/App')
+const Store = require('../src/infrastructure/Store')
 const { prepareClient, config: runtimeConfig } = require('./helpers/runtime')
 
 const guildId = '100000000000000001'
@@ -35,6 +35,8 @@ function fixture({ store = { async close() {} }, mail = { async sendMail() {}, c
         closed.push('client')
     }
     store.sweep ||= async () => {}
+    store.status ||= async () => ({ meta: undefined, count: 0, unreconciled: 0 })
+    store.removedClaims ||= async () => []
     store.activeClaims ||= async () => []
     const shoots = {
         async initialize() {},
@@ -50,6 +52,7 @@ function fixture({ store = { async close() {} }, mail = { async sendMail() {}, c
         async initialize() {
             return { id: 'unverified' }
         },
+        async syncMember() {},
         async syncGuild() {
             return { added: 0, removed: 0, failed: 0 }
         }
@@ -92,7 +95,15 @@ function fixture({ store = { async close() {} }, mail = { async sendMail() {}, c
             }
         }
     }
-    return { app, client, closed, interaction, handle: client.listeners('interactionCreate')[0] }
+    return {
+        app,
+        client,
+        closed,
+        interaction,
+        unverifiedRoles,
+        shoots,
+        handle: client.listeners('interactionCreate')[0]
+    }
 }
 
 test('importing runtime modules needs no environment, database, or Discord connection', () => {
@@ -191,7 +202,7 @@ test(
             await f.app.shutdown()
             fs.rmSync(dir, { recursive: true, force: true })
         })
-        await store.mergeRoster(guildId, [{ email: 'member@example.org', role: 'gm' }], adminId)
+        await store.replaceRoster(guildId, [{ email: 'member@example.org', role: 'gm' }], adminId)
         await f.app.start()
         const request = f.handle(f.interaction(null))
         await sending.promise
@@ -199,7 +210,7 @@ test(
         const reconcile = f.interaction('roster')
         await f.handle(reconcile)
         assert.ok(reconcile.replies.length)
-        await store.mergeRoster(guildId, [{ email: 'member@example.org', role: 'exec' }], adminId)
+        await store.replaceRoster(guildId, [{ email: 'member@example.org', role: 'exec' }], adminId)
         assert.equal(await store.pendingFor(guildId, userId), undefined)
         delivered.resolve()
         await request
@@ -215,6 +226,12 @@ function startupFixture({ ready, initialize, role = {}, loginError } = {}) {
         async sweep() {
             events.push('sweep')
         },
+        async status() {
+            return { meta: undefined, count: 0, unreconciled: 0 }
+        },
+        async removedClaims() {
+            return []
+        },
         async activeClaims() {
             return []
         },
@@ -222,7 +239,8 @@ function startupFixture({ ready, initialize, role = {}, loginError } = {}) {
             events.push('close')
         }
     }
-    guild.roles.fetch = async (id) => ({ id, position: 1, managed: false, ...role })
+    const fetchRoles = guild.roles.fetch
+    guild.roles.fetch = async (id) => (id ? { id, position: 1, managed: false, ...role } : fetchRoles())
     const unverifiedRoles = {
         async initialize() {
             events.push('unverified')
@@ -311,4 +329,60 @@ test('shutdown during initialization rejects start and drains without starting l
     await stop
     assert.deepEqual(f.events, ['close'])
     await assert.rejects(f.app.start(), /stopping/)
+})
+
+test('member rejoin restores the latest tier immediately and reconnect schedules both services', async (t) => {
+    const roleCache = new Map()
+    const store = {
+        async close() {},
+        async status() {
+            return { meta: { version: 1, authoritative: 1 }, count: 1 }
+        },
+        async activeClaims() {
+            return []
+        },
+        async claimForUser() {
+            return {
+                email: 'member@example.org',
+                user_id: userId,
+                role: 'exec',
+                managed_role: 0,
+                managed_exec_role: 0,
+                managed_admin_role: 0
+            }
+        },
+        async markRoleManaged() {}
+    }
+    const f = fixture({ store })
+    t.after(() => f.app.shutdown())
+    await f.app.start()
+    const guild = await f.client.guilds.fetch(guildId)
+    const member = {
+        id: userId,
+        user: { bot: false },
+        guild,
+        roles: {
+            cache: roleCache,
+            async add(id) {
+                roleCache.set(id, {})
+                return member
+            }
+        }
+    }
+    guild.members.fetch = async () => member
+    let shoots = 0,
+        scans = 0
+    f.shoots.reconcileAll = async () => {
+        shoots++
+    }
+    f.unverifiedRoles.syncGuild = async () => {
+        scans++
+        return { added: 0, removed: 0, failed: 0 }
+    }
+    await f.client.listeners('guildMemberAdd')[0](member)
+    assert.equal(roleCache.has(runtimeConfig.memberRoleId), true)
+    assert.equal(roleCache.has(runtimeConfig.execRoleId), true)
+    await f.client.listeners('shardResume')[0]()
+    assert.equal(scans, 1)
+    assert.equal(shoots, 2)
 })

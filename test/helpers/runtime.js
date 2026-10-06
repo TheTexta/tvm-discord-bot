@@ -2,7 +2,7 @@
 'use strict'
 
 const { EventEmitter } = require('node:events')
-const { PermissionFlagsBits } = require('discord.js')
+const { Collection, PermissionFlagsBits } = require('discord.js')
 
 const config = {
     guildId: '100000000000000001',
@@ -17,15 +17,26 @@ const config = {
 function prepareClient(client = new EventEmitter(), overrides = {}) {
     const guild = {
         id: config.guildId,
-        roles: { fetch: async (id) => ({ id, position: 1, managed: false }) },
+        roles: {
+            fetch: async (id) =>
+                id
+                    ? { id, position: 1, managed: false }
+                    : new Collection([[config.guildId, { id: config.guildId, permissions: 0n }]])
+        },
         members: {
-            fetchMe: async () => ({ roles: { highest: { position: 10 } }, permissions: { has: () => true } })
+            fetchMe: async () => ({
+                id: '100000000000000099',
+                roles: { highest: { position: 10 } },
+                permissions: { has: () => true }
+            })
         }
     }
     client.guilds = { fetch: async () => guild }
     client.channels = {
         fetch: async () => ({
             guildId: config.guildId,
+            type: 0,
+            permissionOverwrites: { cache: new Collection() },
             isTextBased: () => true,
             permissionsFor: () => ({ has: () => true }),
             send: async () => {}

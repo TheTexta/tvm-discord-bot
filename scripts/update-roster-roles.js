@@ -2,9 +2,9 @@
 'use strict'
 
 const fs = require('node:fs')
-const { parseRoster } = require('../src/tvm/roster')
-const Store = require('../src/tvm/Store')
-const { loadRosterConfig } = require('../src/tvm/config')
+const { parseRoster } = require('../src/membership/roster')
+const Store = require('../src/infrastructure/Store')
+const { loadRosterConfig } = require('../src/app/config')
 
 const filename = process.argv[2]
 const expectedCount = Number(process.argv[3])
