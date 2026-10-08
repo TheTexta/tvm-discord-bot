@@ -22,7 +22,7 @@ Migration 7 preserves existing roster entries, identity links, and each role own
 
 Back up first, deploy one replica, and upload the complete current roster. The accepted CSV activates snapshot control: omitted emails become ineligible immediately, and background synchronization removes only bot-owned roles. Tier changes remove bot-owned obsolete Exec/Admin roles. Externally assigned roles remain untouched, including on verified accounts. An inactive email keeps its account link and automatically regains the latest tier if it returns. `/roster release` intentionally unlinks an account; it does not remove email eligibility from the CSV. Offboarding is performed by omission from the next snapshot.
 
-`TVM_AUTO_ROLE_REVOCATION` is retired and ignored, including existing `false` values. Admin Team and Discord Administrator authority remain available for externally assigned roles, and shoot organizers retain their existing access exception. Do not treat CSV omission as removal of those protected privileges.
+`TVM_AUTO_ROLE_REVOCATION` is retired and ignored, including existing `false` values. Shoot participation follows the current GM, Exec, or Admin Team roles, or Discord Administrator permission, without requiring an email verification record. Externally assigned membership roles preserve eligibility even after CSV omission or account release; members with only bot-owned roles lose shoot eligibility once membership synchronization removes them. Admin Team and Discord Administrator authority remain available for externally assigned roles, and shoot organizers retain their existing access exception. Do not treat CSV omission as removal of those protected privileges.
 
 ## Health and monitoring
 

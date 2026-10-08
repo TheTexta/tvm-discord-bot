@@ -41,7 +41,7 @@ test('command and modal permissions are checked independently; invalid invites c
     const shoot = await f.store.getShoot(setup.modal.custom_id.split(':')[3], IDS.guild)
     assert.equal(shoot.status, 'draft')
     assert.equal(shoot.channel_id, null)
-    assert.ok(submit.replies.at(-1).content.includes('verified'))
+    assert.match(submit.replies.at(-1).content, /GM/)
 })
 
 test('close creates a read-only archive, blocks new joins, allows withdrawal, and reopens', async (t) => {
@@ -72,7 +72,7 @@ test('close creates a read-only archive, blocks new joins, allows withdrawal, an
     assert.ok(allows(chat, IDS.extra, P.SendMessages))
 })
 
-test('reconciliation removes access after verification is revoked; organizer access persists', async (t) => {
+test('GM access survives verification revocation and is removed when membership roles are lost', async (t) => {
     const f = await fixture(t)
     const { shoot } = await f.create()
     await f.react(shoot, 'joined')
@@ -80,6 +80,11 @@ test('reconciliation removes access after verification is revoked; organizer acc
     await f.store.releaseClaim(IDS.guild, 'invited@example.org', IDS.admin)
     await f.service.reconcileAll()
     const chat = f.channels.get(shoot.channel_id)
+    assert.ok(allows(chat, IDS.joined, P.SendMessages))
+    assert.ok(allows(chat, IDS.invited, P.SendMessages))
+    f.members.get(IDS.joined).roles.cache.delete(IDS.memberRole)
+    f.members.get(IDS.invited).roles.cache.delete(IDS.memberRole)
+    await f.service.reconcileAll()
     assert.equal(chat.permissionOverwrites.cache.has(IDS.joined), false)
     assert.equal(chat.permissionOverwrites.cache.has(IDS.invited), false)
     assert.ok(allows(chat, IDS.admin, P.ViewChannel))
@@ -274,7 +279,7 @@ test('Admin Team can manage another organizer’s archived shoot and lose author
     assert.equal((await f.store.getShoot(shoot.id, IDS.guild)).status, 'closed')
 })
 
-test('removing Admin Team from a verified archived participant restores read-only access', async (t) => {
+test('removing Admin Team from a GM archived participant restores read-only access', async (t) => {
     const f = await fixture(t)
     const { shoot } = await f.create()
     const participant = f.members.get(IDS.invited)

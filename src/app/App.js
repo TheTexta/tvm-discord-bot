@@ -113,7 +113,6 @@ function createApp({
         new ShootService({
             client,
             store: store.shoots || store,
-            membershipStore: store.membership || store,
             config,
             alertAdmins
         })

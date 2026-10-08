@@ -21,7 +21,9 @@ const IDS = {
     archive: '100000000000000009',
     other: '100000000000000010',
     extra: '100000000000000011',
-    adminRole: '100000000000000012'
+    adminRole: '100000000000000012',
+    memberRole: '100000000000000013',
+    execRole: '100000000000000014'
 }
 const fields = (name = 'TVM film', value = '2026-10-15 13:30', location = 'Studio', period = 'day') => {
     const [date = '', time = ''] = value.split(' ')
@@ -76,7 +78,11 @@ async function fixture(t) {
         const member = {
             id,
             user,
-            roles: { cache: new Collection() },
+            roles: {
+                cache: new Collection(
+                    ['invited', 'joined', 'extra'].includes(name) ? [[IDS.memberRole, { id: IDS.memberRole }]] : []
+                )
+            },
             permissions: new PermissionsBitField(name === 'admin' || name === 'bot' ? P.Administrator : 0n)
         }
         members.set(id, member)
@@ -258,6 +264,8 @@ async function fixture(t) {
     const client = { user: members.get(IDS.bot).user, guilds: { fetch: async () => guild } }
     const config = {
         guildId: IDS.guild,
+        memberRoleId: IDS.memberRole,
+        execRoleId: IDS.execRole,
         adminRoleId: IDS.adminRole,
         shoots: { announcementChannelId: IDS.announce, categoryId: IDS.active, archiveCategoryId: IDS.archive }
     }
@@ -367,7 +375,6 @@ async function fixture(t) {
             store = new Store(filename, 's'.repeat(32))
             await store.ready
             service.store = store
-            service.membershipStore = store
         }
     }
 }

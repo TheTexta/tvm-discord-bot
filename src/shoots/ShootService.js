@@ -29,10 +29,9 @@ const { parseMembers, parseDetails, shootCommand, modal } = require('./forms')
 const { memberFields } = require('./render')
 
 class ShootService {
-    constructor({ client, store, membershipStore = store, config, alertAdmins }) {
+    constructor({ client, store, config, alertAdmins }) {
         this.client = client
         this.store = store
-        this.membershipStore = membershipStore
         this.config = config
         this.settings = config.shoots
         this.alertAdmins = alertAdmins
@@ -115,7 +114,8 @@ class ShootService {
             member &&
             !member.user.bot &&
             (isBotAdmin(member, this.config.adminRoleId) ||
-                (await this.membershipStore.isAuthorizedUser(guild.id, userId)))
+                member.roles.cache.has(this.config.memberRoleId) ||
+                member.roles.cache.has(this.config.execRoleId))
         )
     }
 

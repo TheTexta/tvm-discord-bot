@@ -3,7 +3,7 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const { joiningAllowed } = require('../src/shoots/ShootService')
-const { PermissionFlagsBits: P, PermissionsBitField } = require('discord.js')
+const { Collection, PermissionFlagsBits: P, PermissionsBitField } = require('discord.js')
 const { IDS, fields, fixture, allows } = require('./helpers/shoot')
 
 test('partial, duplicate, and concurrent reaction events join once and preserve direct invitations', async (t) => {
@@ -96,7 +96,12 @@ test('participant capacity rejects excess joins without breaking existing access
     for (let i = 0; i < rows.length; i++) {
         const id = String(700000000000000000n + BigInt(i))
         const user = { id, bot: false, send: async () => {} }
-        f.members.set(id, { id, user, permissions: new PermissionsBitField(0n) })
+        f.members.set(id, {
+            id,
+            user,
+            roles: { cache: new Collection([[IDS.memberRole, { id: IDS.memberRole }]]) },
+            permissions: new PermissionsBitField(0n)
+        })
         await f.store.savePending(IDS.guild, id, rows[i].email, '123456')
         assert.equal((await f.store.verifyAndClaim(IDS.guild, id, '123456')).ok, true)
         reaction.normal.set(id, user)
@@ -115,7 +120,7 @@ test('failed reaction cleanup cannot prevent revoking an ineligible member', asy
     const f = await fixture(t)
     const { shoot } = await f.create()
     const reaction = await f.react(shoot, 'joined')
-    await f.store.releaseClaim(IDS.guild, 'joined@example.org', IDS.admin)
+    f.members.get(IDS.joined).roles.cache.delete(IDS.memberRole)
     reaction.users.remove = async () => {
         throw new Error('missing Manage Messages')
     }
