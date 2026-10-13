@@ -103,5 +103,8 @@ class Store extends SqliteDatabase {
     inviteShootParticipant(...args) {
         return this.shoots.inviteShootParticipant(...args)
     }
+    removeShootParticipant(...args) {
+        return this.shoots.removeShootParticipant(...args)
+    }
 }
 module.exports = Store

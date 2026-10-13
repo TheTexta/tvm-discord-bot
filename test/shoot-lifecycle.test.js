@@ -240,7 +240,7 @@ test('Admin Team can use every shoot control without Administrator or a roster c
     editSubmit.fields = fields('Updated shoot')
     await f.service.handleInteraction(editSubmit)
     assert.equal((await f.store.getShoot(shoot.id, IDS.guild)).name, 'Updated shoot')
-    for (const command of ['crew', 'add', 'close']) {
+    for (const command of ['crew', 'add', 'remove', 'add', 'close']) {
         const control = f.interaction({ command, channelId: shoot.channel_id, userId: organizer.id })
         await f.service.handleInteraction(control)
         assert.equal(control.deferred, true)

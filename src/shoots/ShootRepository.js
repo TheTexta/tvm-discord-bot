@@ -97,5 +97,14 @@ class ShootRepository extends Repository {
             )
         )
     }
+    removeShootParticipant(id, userId) {
+        return this._locked(() =>
+            this._run(
+                `UPDATE shoot_participants SET invited = 0, reacted = 0, reaction_message_id = NULL
+            WHERE shoot_id = ? AND user_id = ?`,
+                [id, userId]
+            )
+        )
+    }
 }
 module.exports = ShootRepository

@@ -16,6 +16,16 @@ Before an upgrade, take a SQLite backup and confirm the test and container check
 
 After deployment, run `npm run discord:check`, inspect the startup log and private alert channel, and confirm `/source` points to the deployed public repository. In a controlled test server, verify roster-based access, release/transfer, reaction joining, private shoot visibility, and read-only archival. Avoid manipulating production members to perform smoke tests.
 
+## Discord bot name and admin visibility
+
+The Discord application name, bot account username, and server nickname are separate settings. The application is named **TVM Bot**. To rename the bot account everywhere, use a one-time authenticated `PATCH /api/v10/users/@me` with `{"username":"TVM Bot"}` and the bot token; confirm the returned username and unchanged bot ID. The bot token must remain private. A server nickname can override the account username in that server; TVM currently has no bot nickname. Renaming the account does not require a new application, token, or invite. See [Discord’s account API](https://docs.discord.com/developers/resources/user#modify-current-user).
+
+**Admin Team** grants bot-management authority by configured role ID; it does not itself grant Discord **Administrator** permission. Verified roster admins receive both General Member and Admin Team. Manually added Admin Team members may have only Admin Team, so member channels must explicitly allow that role to view them. `Unverified` is removed when any other role is present, regardless of email verification; changing that role does not repair missing channel allows.
+
+Allow Admin Team **View Channel** on the General Members category and its member channels. General Members, gm-discussion, and MEETING share synchronized permissions; learning-resources has independent overwrites and requires its own allow. Pitches and all-things-production already allow Admin Team. The separate editors channel, IT, archive, and other private restrictions keep their existing access policies. Edit only the relevant role overwrite bits, preserving other role and member overwrites. Category edits update synchronized children, while independently configured channels need separate edits. See [Discord’s permission rules](https://docs.discord.com/developers/topics/permissions).
+
+Verify visibility for Admin Team without General Member, a General Member, and a roleless or Unverified member. `npm run discord:check` validates bot setup and alert privacy; it does not validate every human member’s channel access. The existing Administrative Access role includes Discord Administrator permission, which bypasses channel overwrites and explains why its holders can see more channels.
+
 ## Activating authoritative roster control
 
 Migration 7 preserves existing roster entries, identity links, and each role ownership flag, and marks merged rosters as awaiting their first authoritative snapshot. No role removals occur during this transition. The database does not contain historical CSV contents and cannot reconstruct the last uploaded file.

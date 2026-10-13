@@ -80,6 +80,14 @@ function shootCommand() {
                         o.setName('user').setDescription(uiText('shoot.addUserOption')).setRequired(true)
                     )
             )
+            .addSubcommand((s) =>
+                s
+                    .setName('remove')
+                    .setDescription(uiText('shoot.remove'))
+                    .addUserOption((o) =>
+                        o.setName('user').setDescription(uiText('shoot.removeUserOption')).setRequired(true)
+                    )
+            )
             .addSubcommand((s) => s.setName('close').setDescription(uiText('shoot.close')))
             .addSubcommand((s) => s.setName('reopen').setDescription(uiText('shoot.reopen')))
             .toJSON()

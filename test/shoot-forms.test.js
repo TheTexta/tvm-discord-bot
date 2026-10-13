@@ -21,8 +21,12 @@ test('shoot configuration is optional, complete, distinct, and validates snowfla
     assert.equal(command.default_member_permissions, null)
     assert.deepEqual(
         command.options.map((option) => option.name),
-        ['setup', 'edit', 'crew', 'add', 'close', 'reopen']
+        ['setup', 'edit', 'crew', 'add', 'remove', 'close', 'reopen']
     )
+    const remove = command.options.find((option) => option.name === 'remove')
+    assert.equal(remove.options[0].name, 'user')
+    assert.equal(remove.options[0].type, 6)
+    assert.equal(remove.options[0].required, true)
 })
 
 test('validates mention input and Toronto calendar/DST times', () => {

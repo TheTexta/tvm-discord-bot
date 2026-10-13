@@ -39,17 +39,17 @@ Existing databases start in transition mode: their merged roster and existing ro
 
 Management commands require the configured Admin Team role or Discord Administrator permission.
 
-| Command                                                                                     | Purpose                                     |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| `/verify`                                                                                   | Request a code for your roster email.       |
-| `/source`                                                                                   | Open this bot’s source repository.          |
-| `/upload`                                                                                   | Merge an eligible-member CSV.               |
-| `/postverify`                                                                               | Publish the verification button.            |
-| `/testmail`                                                                                 | Send a delivery test to a controlled inbox. |
-| `/roster status`, `/roster audit`                                                           | Inspect roster status and changes.          |
-| `/roster reconcile`, `/roster repair`                                                       | Retry membership role synchronization.      |
-| `/roster transfer`, `/roster release`                                                       | Move or release a verified account claim.   |
-| `/shoot setup`, `/shoot edit`, `/shoot crew`, `/shoot add`, `/shoot close`, `/shoot reopen` | Manage private shoot chats when configured. |
+| Command                                                                                                      | Purpose                                     |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
+| `/verify`                                                                                                    | Request a code for your roster email.       |
+| `/source`                                                                                                    | Open this bot’s source repository.          |
+| `/upload`                                                                                                    | Merge an eligible-member CSV.               |
+| `/postverify`                                                                                                | Publish the verification button.            |
+| `/testmail`                                                                                                  | Send a delivery test to a controlled inbox. |
+| `/roster status`, `/roster audit`                                                                            | Inspect roster status and changes.          |
+| `/roster reconcile`, `/roster repair`                                                                        | Retry membership role synchronization.      |
+| `/roster transfer`, `/roster release`                                                                        | Move or release a verified account claim.   |
+| `/shoot setup`, `/shoot edit`, `/shoot crew`, `/shoot add`, `/shoot remove`, `/shoot close`, `/shoot reopen` | Manage private shoot chats when configured. |
 
 ## Operator and contributor guides
 

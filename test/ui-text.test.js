@@ -51,6 +51,9 @@ test('editable text validates missing keys, placeholders and component limits wi
         ['buttons.verify', 'x'.repeat(81), /buttons.verify/],
         ['shoot.nameLabel', 'x'.repeat(46), /shoot.nameLabel/],
         ['shoot.setup', 'x'.repeat(101), /shoot.setup/],
+        ['shoot.remove', 'x'.repeat(101), /shoot.remove/],
+        ['shoot.removeUserOption', 'x'.repeat(101), /shoot.removeUserOption/],
+        ['shoot.removed', 'Removed participant', /shoot.removed/],
         ['shoot.joinDescription', 'x'.repeat(101), /shoot.joinDescription/]
     ]) {
         const candidate = structuredClone(text)

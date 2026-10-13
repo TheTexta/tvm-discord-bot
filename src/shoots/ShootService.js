@@ -242,6 +242,36 @@ class ShootService {
                 })
                 return
             }
+            if (action === 'remove') {
+                if (!['open', 'closed'].includes(current.status)) throw new Error(uiText('shoot.pending'))
+                const user = interaction.options.getUser('user', true)
+                if (user.id === current.organizer_id) throw new Error(uiText('shoot.removeOrganizer'))
+                const member = await interaction.guild.members.fetch({ user: user.id, force: true }).catch((error) => {
+                    if (error.code === 10007) return null
+                    throw error
+                })
+                if (current.announcement_id && current.announcement_deleted_at == null) {
+                    const channel = await interaction.guild.channels.fetch(this.settings.announcementChannelId)
+                    const message = await this.fetchMessage(channel, current.announcement_id)
+                    // Remove the live reaction first: a stale reaction must not
+                    // immediately restore membership during reconciliation.
+                    await message?.reactions.cache
+                        .get(EMOJI)
+                        ?.users.remove(user.id)
+                        .catch((error) => {
+                            if (error.code !== 10008 && error.code !== 10014) throw error
+                        })
+                }
+                await this.store.removeShootParticipant(shoot.id, user.id)
+                await this.synchronize(shoot.id)
+                await interaction.editReply({
+                    content:
+                        uiText('shoot.removed', { userId: user.id }) +
+                        (isBotAdmin(member, this.config.adminRoleId) ? ` ${uiText('shoot.removedAdminAccess')}` : ''),
+                    allowedMentions: noMentions
+                })
+                return
+            }
             if (action === 'close' || action === 'reopen') {
                 if (!['open', 'closed'].includes(current.status)) throw new Error(uiText('shoot.pending'))
                 // Honor the current admission policy before changing it, including
