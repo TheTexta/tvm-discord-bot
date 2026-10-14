@@ -37,7 +37,7 @@ Existing databases start in transition mode: their merged roster and existing ro
 
 ## Common commands
 
-Management commands require the configured Admin Team role or Discord Administrator permission.
+Management commands require the configured Admin Team role or Discord Administrator permission. The manually assigned `all production access` role controls visibility and participation across all shoots, Broadcast, and Post Credits; Admin Team alone does not grant that visibility. Admins retain access to shoots they organize or join.
 
 | Command                                                                                                      | Purpose                                     |
 | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |

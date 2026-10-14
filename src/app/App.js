@@ -224,6 +224,9 @@ function createApp({
                 if (stopping) return
                 const unverifiedRole = await unverifiedRoles.initialize(guild)
                 if (stopping) return
+                if (config.productionAccessRoleId === unverifiedRole.id) {
+                    throw new Error('TVM_PRODUCTION_ACCESS_ROLE_ID must be separate from Unverified')
+                }
                 unverifiedReady = true
                 const result = await reconcile(guild)
                 if (stopping) return

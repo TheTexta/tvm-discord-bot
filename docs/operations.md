@@ -78,3 +78,9 @@ Shoot synchronization runs every minute and at reconnect. Keep recovery markers 
 For rollback, stop the new bot and deploy the previous known-good commit against a compatible database. If a future migration is incompatible, restore the matching pre-upgrade snapshot rather than downgrading the schema in place. Never run the old and new bot concurrently.
 
 The GitHub repository is `TheTexta/tvm-discord-bot`. Keep Coolify’s application UUID, service identity, and data volume when updating its Git source URL; renaming the source does not require creating a replacement application.
+
+## Production access
+
+Create `all production access` with no server-wide permissions, below Admin Team and the bot, and set `TVM_PRODUCTION_ACCESS_ROLE_ID` in the runtime environment. Enabled shoots require this separate role. Assign it manually to selected admins and remove it manually when no longer needed; roster synchronization does not manage it. It grants viewing and participation across active and archived shoots, Broadcast, and Post Credits. Admin Team retains bot management authority and access to its own or joined shoots, but no blanket production visibility. Discord Administrator permission and server ownership continue to bypass channel restrictions.
+
+When upgrading, create and configure the role before deploying. Startup reconciliation replaces existing shoots’ Admin Team overwrite with the production-access overwrite. Update both production categories and every independently configured child channel to grant the new role access and remove the Admin Team grants, preserving all other role and individual permissions. Grant the role access on the active and archived shoot categories as well; shoot channels maintain their own explicit permissions. Run `npm run discord:check` and verify the permissions after the next reconciliation.

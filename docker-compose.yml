@@ -11,6 +11,7 @@ services:
             TVM_MEMBER_ROLE_ID: ${TVM_MEMBER_ROLE_ID:?required}
             TVM_EXEC_ROLE_ID: ${TVM_EXEC_ROLE_ID:?required}
             TVM_ADMIN_ROLE_ID: ${TVM_ADMIN_ROLE_ID:?required}
+            TVM_PRODUCTION_ACCESS_ROLE_ID: ${TVM_PRODUCTION_ACCESS_ROLE_ID:-}
             TVM_UNVERIFIED_ROLE_ID: ${TVM_UNVERIFIED_ROLE_ID:-}
             TVM_ADMIN_ALERT_CHANNEL_ID: ${TVM_ADMIN_ALERT_CHANNEL_ID:?required}
             SMTP_FROM: ${SMTP_FROM:?required}

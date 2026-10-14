@@ -126,22 +126,26 @@ test('shoot remove rejects shoots whose status is still changing', async (t) => 
     assert.equal((await f.store.shootParticipants(shoot.id)).find((row) => row.user_id === IDS.invited).invited, 1)
 })
 
-test('shoot remove allows an Admin Team caller and explains retained admin visibility', async (t) => {
-    for (const authority of ['role', 'administrator']) {
+test('shoot remove allows an Admin Team caller and explains retained production visibility', async (t) => {
+    for (const authority of ['production', 'administrator', 'admin-only']) {
         await t.test(authority, async (t) => {
             const f = await fixture(t)
             const { shoot } = await f.create()
             const caller = f.members.get(IDS.outsider)
             caller.roles.cache.set(IDS.adminRole, { id: IDS.adminRole })
             const target = f.members.get(IDS.invited)
-            if (authority === 'role') target.roles.cache.set(IDS.adminRole, { id: IDS.adminRole })
-            else target.permissions = new PermissionsBitField(P.Administrator)
+            if (authority === 'production') target.roles.cache.set(IDS.productionRole, { id: IDS.productionRole })
+            else if (authority === 'administrator') target.permissions = new PermissionsBitField(P.Administrator)
+            else target.roles.cache.set(IDS.adminRole, { id: IDS.adminRole })
             await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id }))
             const interaction = removal(f, shoot, target.id, caller.id)
             await f.service.handleInteraction(interaction)
-            assert.match(interaction.replies.at(-1).content, /admin permissions still grant access/)
+            if (authority === 'admin-only')
+                assert.doesNotMatch(interaction.replies.at(-1).content, /still grants access/)
+            else assert.match(interaction.replies.at(-1).content, /production access role or Discord Administrator/)
             await assertRemoved(f, shoot, target.id)
-            assert.ok(allows(f.channels.get(shoot.channel_id), IDS.adminRole, P.ViewChannel))
+            assert.equal(f.channels.get(shoot.channel_id).permissionOverwrites.cache.has(IDS.adminRole), false)
+            assert.ok(allows(f.channels.get(shoot.channel_id), IDS.productionRole, P.ViewChannel))
             assert.equal(f.errors.length, 0)
         })
     }

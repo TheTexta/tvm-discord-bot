@@ -23,7 +23,8 @@ const IDS = {
     extra: '100000000000000011',
     adminRole: '100000000000000012',
     memberRole: '100000000000000013',
-    execRole: '100000000000000014'
+    execRole: '100000000000000014',
+    productionRole: '100000000000000015'
 }
 const fields = (name = 'TVM film', value = '2026-10-15 13:30', location = 'Studio', period = 'day') => {
     const [date = '', time = ''] = value.split(' ')
@@ -79,6 +80,7 @@ async function fixture(t) {
             id,
             user,
             roles: {
+                highest: { comparePositionTo: (role) => 10 - role.position },
                 cache: new Collection(
                     ['invited', 'joined', 'extra'].includes(name) ? [[IDS.memberRole, { id: IDS.memberRole }]] : []
                 )
@@ -237,6 +239,15 @@ async function fixture(t) {
     channel(IDS.other)
     const guild = {
         id: IDS.guild,
+        roles: {
+            cache: new Collection([
+                [
+                    IDS.productionRole,
+                    { id: IDS.productionRole, position: 1, managed: false, permissions: new PermissionsBitField(0n) }
+                ]
+            ]),
+            fetch: async (id) => guild.roles.cache.get(id) || null
+        },
         members: {
             fetchMe: async () => members.get(IDS.bot),
             fetch: async (input) => {
@@ -267,6 +278,7 @@ async function fixture(t) {
         memberRoleId: IDS.memberRole,
         execRoleId: IDS.execRole,
         adminRoleId: IDS.adminRole,
+        productionAccessRoleId: IDS.productionRole,
         shoots: { announcementChannelId: IDS.announce, categoryId: IDS.active, archiveCategoryId: IDS.archive }
     }
     const service = new ShootService({ client, store, config, alertAdmins: async (message) => errors.push(message) })

@@ -180,7 +180,7 @@
         "removeUserOption": "Participant to remove from this shoot",
         "removeOrganizer": "The shoot organizer cannot be removed.",
         "removed": "Removed <@{userId}> from this shoot’s participants.",
-        "removedAdminAccess": "Their admin permissions still grant access to this chat.",
+        "removedAdminAccess": "Their all production access role or Discord Administrator permission still grants access to this chat.",
         "dateLabel": "Shoot date (YYYY-MM-DD; optional)",
         "joinLabel": "Reaction joining window",
         "joinDescription": "Starts when the invitation is first published; month means 30 days.",

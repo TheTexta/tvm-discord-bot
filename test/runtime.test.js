@@ -25,7 +25,12 @@ const deferred = () => {
     return { promise, resolve }
 }
 
-function fixture({ store = { async close() {} }, mail = { async sendMail() {}, close() {} }, timeout = 1000 } = {}) {
+function fixture({
+    store = { async close() {} },
+    mail = { async sendMail() {}, close() {} },
+    timeout = 1000,
+    config = {}
+} = {}) {
     const closed = []
     const { client, rest } = prepareClient(new EventEmitter())
     client.login = async () => {
@@ -58,7 +63,7 @@ function fixture({ store = { async close() {} }, mail = { async sendMail() {}, c
         }
     }
     const app = createApp({
-        config: { ...runtimeConfig, adminRoleId: adminId },
+        config: { ...runtimeConfig, adminRoleId: adminId, ...config },
         rest,
         store,
         mail,
@@ -105,6 +110,14 @@ function fixture({ store = { async close() {} }, mail = { async sendMail() {}, c
         handle: client.listeners('interactionCreate')[0]
     }
 }
+
+test('startup rejects production access pointing to the automatically discovered Unverified role', async () => {
+    const id = '100000000000000015'
+    const f = fixture({ config: { productionAccessRoleId: id } })
+    f.unverifiedRoles.initialize = async () => ({ id })
+    await assert.rejects(f.app.start(), /separate from Unverified/)
+    await f.app.shutdown()
+})
 
 test('importing runtime modules needs no environment, database, or Discord connection', () => {
     const result = spawnSync(process.execPath, ['-e', "require('./src/tvm/App'); require('./src/tvm/index')"], {

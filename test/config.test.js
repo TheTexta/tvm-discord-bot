@@ -31,6 +31,32 @@ test('configuration uses injected environment, ignores retired revocation settin
     assert.throws(() => loadConfig({ ...env, VERIFICATION_CODE_SECRET: 'short' }), /32 characters/)
 })
 
+test('production access requires its own role when shoots are enabled', () => {
+    const shoots = {
+        ...env,
+        TVM_SHOOT_ANNOUNCEMENT_CHANNEL_ID: '100000000000000007',
+        TVM_SHOOT_CATEGORY_ID: '100000000000000008',
+        TVM_SHOOT_ARCHIVE_CATEGORY_ID: '100000000000000009'
+    }
+    const id = '100000000000000010'
+    assert.equal(loadConfig(env).productionAccessRoleId, null)
+    assert.throws(() => loadConfig(shoots), /Missing required TVM_PRODUCTION_ACCESS_ROLE_ID/)
+    assert.equal(loadConfig({ ...shoots, TVM_PRODUCTION_ACCESS_ROLE_ID: ` ${id} ` }).productionAccessRoleId, id)
+    for (const invalid of [
+        'bad',
+        env.TVM_GUILD_ID,
+        env.TVM_MEMBER_ROLE_ID,
+        env.TVM_EXEC_ROLE_ID,
+        env.TVM_ADMIN_ROLE_ID
+    ]) {
+        assert.throws(() => loadConfig({ ...shoots, TVM_PRODUCTION_ACCESS_ROLE_ID: invalid }), /conflicting/)
+    }
+    assert.throws(
+        () => loadConfig({ ...shoots, TVM_PRODUCTION_ACCESS_ROLE_ID: id, TVM_UNVERIFIED_ROLE_ID: id }),
+        /conflicting TVM_PRODUCTION_ACCESS_ROLE_ID/
+    )
+})
+
 test('roster maintenance configuration needs only validated database and guild credentials', () => {
     assert.deepEqual(
         loadRosterConfig({

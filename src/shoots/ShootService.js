@@ -13,7 +13,7 @@ const {
 } = require('discord.js')
 const { uiText } = require('../shared/uiText')
 const ShootResources = require('./ShootResources')
-const { hasAdminTeamRole, isBotAdmin, canManageBot } = require('../shared/permissions')
+const { isBotAdmin, canManageBot } = require('../shared/permissions')
 const {
     EMOJI,
     BOT_PERMISSIONS,
@@ -66,6 +66,20 @@ class ShootService {
         if (!this.settings || this.stopped) return
         const guild = await this.client.guilds.fetch(this.config.guildId)
         const bot = await guild.members.fetchMe()
+        const productionRole = this.config.productionAccessRoleId
+            ? await guild.roles.fetch(this.config.productionAccessRoleId)
+            : null
+        if (
+            !productionRole ||
+            productionRole.id === guild.id ||
+            productionRole.managed ||
+            productionRole.permissions.bitfield !== 0n ||
+            bot.roles.highest.comparePositionTo(productionRole) <= 0
+        ) {
+            throw new Error(
+                'TVM_PRODUCTION_ACCESS_ROLE_ID must identify a separate, manageable role with no server-wide permissions'
+            )
+        }
         for (const [id, type, permissions] of [
             [this.settings.announcementChannelId, ChannelType.GuildText, ANNOUNCEMENT_PERMISSIONS],
             [this.settings.categoryId, ChannelType.GuildCategory, BOT_PERMISSIONS],
@@ -117,6 +131,10 @@ class ShootService {
                 member.roles.cache.has(this.config.memberRoleId) ||
                 member.roles.cache.has(this.config.execRoleId))
         )
+    }
+
+    hasProductionAccess(member) {
+        return Boolean(member?.roles?.cache?.has(this.config.productionAccessRoleId) || isBotAdmin(member, null))
     }
 
     async handleInteraction(interaction) {
@@ -267,7 +285,7 @@ class ShootService {
                 await interaction.editReply({
                     content:
                         uiText('shoot.removed', { userId: user.id }) +
-                        (isBotAdmin(member, this.config.adminRoleId) ? ` ${uiText('shoot.removedAdminAccess')}` : ''),
+                        (this.hasProductionAccess(member) ? ` ${uiText('shoot.removedAdminAccess')}` : ''),
                     allowedMentions: noMentions
                 })
                 return
@@ -366,16 +384,18 @@ class ShootService {
         const guild = await this.client.guilds.fetch(this.config.guildId)
         const closed = ['closing', 'closed'].includes(shoot.status)
         const participantIds = await this.participantIds(shoot, guild)
-        // Member overwrites take precedence over role overwrites. Keep Admin Team
-        // participants able to run management commands in archived chats too.
-        const adminParticipantIds = new Set()
+        // Member overwrites take precedence over role overwrites. Preserve archive
+        // posting for production-access holders and participating admins.
+        const writableParticipantIds = new Set()
         if (closed) {
             for (const userId of participantIds) {
                 const member = await guild.members.fetch({ user: userId, force: true }).catch((error) => {
                     if (error.code === 10007) return null
                     throw error
                 })
-                if (hasAdminTeamRole(member, this.config.adminRoleId)) adminParticipantIds.add(userId)
+                if (isBotAdmin(member, this.config.adminRoleId) || this.hasProductionAccess(member)) {
+                    writableParticipantIds.add(userId)
+                }
             }
         }
         const permissions = overwrites(
@@ -383,8 +403,8 @@ class ShootService {
             this.client.user.id,
             participantIds,
             closed,
-            this.config.adminRoleId,
-            adminParticipantIds
+            this.config.productionAccessRoleId,
+            writableParticipantIds
         )
         const resource = await this.resources.ensureChannel(shoot, guild, permissions)
         const channel = resource.channel

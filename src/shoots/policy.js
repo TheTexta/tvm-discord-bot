@@ -34,15 +34,22 @@ function joiningAllowed(shoot, now = Date.now()) {
     )
 }
 
-function overwrites(guildId, botId, participantIds, closed, adminRoleId, adminParticipantIds = new Set()) {
+function overwrites(
+    guildId,
+    botId,
+    participantIds,
+    closed,
+    productionAccessRoleId,
+    writableParticipantIds = new Set()
+) {
     const everyoneDeny = [...WRITE, ...THREADS, P.ViewChannel]
     return [
         { id: guildId, type: 0, allow: [], deny: everyoneDeny },
         { id: botId, type: 1, allow: BOT_PERMISSIONS, deny: [] },
-        ...(adminRoleId
+        ...(productionAccessRoleId
             ? [
                   {
-                      id: adminRoleId,
+                      id: productionAccessRoleId,
                       type: 0,
                       allow: [...READ, ...WRITE, P.AttachFiles, P.EmbedLinks, P.UseApplicationCommands],
                       deny: THREADS
@@ -54,8 +61,9 @@ function overwrites(guildId, botId, participantIds, closed, adminRoleId, adminPa
             .map((id) => ({
                 id,
                 type: 1,
-                allow: closed && !adminParticipantIds.has(id) ? READ : [...READ, ...WRITE, P.AttachFiles, P.EmbedLinks],
-                deny: closed && !adminParticipantIds.has(id) ? [...WRITE, ...THREADS] : THREADS
+                allow:
+                    closed && !writableParticipantIds.has(id) ? READ : [...READ, ...WRITE, P.AttachFiles, P.EmbedLinks],
+                deny: closed && !writableParticipantIds.has(id) ? [...WRITE, ...THREADS] : THREADS
             }))
     ]
 }

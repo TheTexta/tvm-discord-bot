@@ -19,6 +19,9 @@ const adminRoleId = required('TVM_ADMIN_ROLE_ID')
 const unverifiedRoleId = process.env.TVM_UNVERIFIED_ROLE_ID?.trim()
 const alertChannelId = required('TVM_ADMIN_ALERT_CHANNEL_ID')
 const shoots = loadShootConfig()
+const productionAccessRoleId = shoots
+    ? required('TVM_PRODUCTION_ACCESS_ROLE_ID')
+    : process.env.TVM_PRODUCTION_ACCESS_ROLE_ID?.trim()
 const base = 'https://discord.com/api/v10'
 
 async function get(path) {
@@ -72,6 +75,18 @@ async function main() {
     }
     const botRoles = roles.data?.filter((role) => member?.data?.roles.includes(role.id)) || []
     const highest = Math.max(0, ...botRoles.map((role) => role.position))
+    if (productionAccessRoleId) {
+        const production = roles.data?.find((role) => role.id === productionAccessRoleId)
+        check(
+            'Production access is a separate, manageable role with no server-wide permissions',
+            Boolean(production) &&
+                ![guildId, memberRoleId, execRoleId, adminRoleId, unverified?.id].includes(production.id) &&
+                !production.managed &&
+                BigInt(production.permissions) === 0n &&
+                highest > production.position
+        )
+        targets.push(production)
+    }
     let basePermissions = BigInt(roles.data?.find((role) => role.id === guildId)?.permissions || 0)
     for (const role of botRoles) basePermissions |= BigInt(role.permissions)
     check(

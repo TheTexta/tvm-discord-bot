@@ -24,6 +24,7 @@ function loadConfig(env = process.env) {
         memberRoleId: required(env, 'TVM_MEMBER_ROLE_ID'),
         execRoleId: required(env, 'TVM_EXEC_ROLE_ID'),
         adminRoleId: required(env, 'TVM_ADMIN_ROLE_ID'),
+        productionAccessRoleId: env.TVM_PRODUCTION_ACCESS_ROLE_ID?.trim() || null,
         unverifiedRoleId: env.TVM_UNVERIFIED_ROLE_ID?.trim() || null,
         alertChannelId: required(env, 'TVM_ADMIN_ALERT_CHANNEL_ID'),
         smtpFrom: required(env, 'SMTP_FROM'),
@@ -47,6 +48,21 @@ function loadConfig(env = process.env) {
             ))
     ) {
         throw new Error('Invalid or conflicting TVM_UNVERIFIED_ROLE_ID')
+    }
+    if (config.shoots && !config.productionAccessRoleId)
+        throw new Error('Missing required TVM_PRODUCTION_ACCESS_ROLE_ID')
+    if (
+        config.productionAccessRoleId &&
+        (!validSnowflake(config.productionAccessRoleId) ||
+            [
+                config.guildId,
+                config.memberRoleId,
+                config.execRoleId,
+                config.adminRoleId,
+                config.unverifiedRoleId
+            ].includes(config.productionAccessRoleId))
+    ) {
+        throw new Error('Invalid or conflicting TVM_PRODUCTION_ACCESS_ROLE_ID')
     }
     if (!validEmail(config.smtpFrom)) throw new Error('Invalid SMTP_FROM')
     if (config.smtpPort !== 465) throw new Error('The TVM runtime currently requires implicit TLS on SMTP port 465')
