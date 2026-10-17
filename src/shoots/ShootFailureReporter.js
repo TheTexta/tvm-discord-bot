@@ -117,7 +117,7 @@ function diagnostics(error) {
                       : `Unexpected ${name}; see bot logs`
     return {
         name,
-        status,
+        httpStatus: status,
         code,
         method: /^(GET|POST|PUT|PATCH|DELETE)$/.test(error?.method) ? error.method : null,
         route,
@@ -196,7 +196,7 @@ class ShootFailureReporter {
             shootId: identifier(context.shootId),
             channelId: identifier(context.channelId),
             name: label(context.name),
-            status: identifier(context.status),
+            shootStatus: identifier(context.status),
             trigger: identifier(context.trigger) || 'unknown',
             workflow: identifier(context.workflow) || 'sync',
             operation: identifier(context.operation) || 'unknown'
@@ -236,7 +236,7 @@ class ShootFailureReporter {
     }
 
     description(context) {
-        return `${context.name} (${context.status || 'unknown'}; ${context.shootId || 'runtime'})${context.channelId ? ` <#${context.channelId}>` : ''}`
+        return `${context.name} (${context.shootStatus || 'unknown'}; ${context.shootId || 'runtime'})${context.channelId ? ` <#${context.channelId}>` : ''}`
     }
 
     async recovered(context) {
