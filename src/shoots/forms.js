@@ -11,6 +11,7 @@ const {
     StringSelectMenuBuilder
 } = require('discord.js')
 const { uiText } = require('../shared/uiText')
+const ShootInputError = require('./ShootInputError')
 const { JOIN_PERIODS, PERIOD_TEXT } = require('./policy')
 const ZONE = 'America/Toronto'
 const FORMAT = 'yyyy-MM-dd HH:mm'
@@ -18,7 +19,7 @@ const FORMAT = 'yyyy-MM-dd HH:mm'
 function parseMembers(value = '') {
     const ids = [...value.matchAll(/<@!?(\d{17,20})>/g)].map((match) => match[1])
     if (value.replace(/<@!?\d{17,20}>/g, '').replace(/[\s,]/g, '') || new Set(ids).size > 70) {
-        throw new Error(uiText('shoot.mentions'))
+        throw new ShootInputError(uiText('shoot.mentions'))
     }
     return [...new Set(ids)]
 }
@@ -33,13 +34,13 @@ function parseDetails(fields) {
         periods = fields.getStringSelectValues('join_period')
     } catch {
         // Forms opened before a deployment may still use the previous input layout.
-        throw new Error(uiText('shoot.expired'))
+        throw new ShootInputError(uiText('shoot.expired'))
     }
     if (periods.length !== 1 || !Object.hasOwn(JOIN_PERIODS, periods[0]))
-        throw new Error(uiText('shoot.invalidJoinPeriod'))
+        throw new ShootInputError(uiText('shoot.invalidJoinPeriod'))
     const join_period = periods[0]
     if (!name || name.length > 100 || !location || location.length > 200)
-        throw new Error(uiText('shoot.invalidDetails'))
+        throw new ShootInputError(uiText('shoot.invalidDetails'))
     if (!date) return { name, location, call_time: null, join_period }
     const value = `${date} ${clock}`
     const time = DateTime.fromFormat(value, FORMAT, { zone: ZONE, locale: 'en' })
@@ -50,7 +51,7 @@ function parseDetails(fields) {
         time.toFormat(FORMAT) !== value ||
         time.getPossibleOffsets().length !== 1
     )
-        throw new Error(uiText('shoot.invalidTime'))
+        throw new ShootInputError(uiText('shoot.invalidTime'))
     return { name, location, call_time: time.toMillis(), join_period }
 }
 

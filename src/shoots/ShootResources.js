@@ -20,20 +20,25 @@ class ShootResources {
     get settings() {
         return this.service.settings
     }
+    operation(name, work) {
+        return this.service.operation(name, work)
+    }
     async ensureChannel(shoot, guild, permissions) {
         let channel
         if (shoot.channel_id) {
-            channel = await guild.channels.fetch(shoot.channel_id, { force: true }).catch((error) => {
+            channel = await this.operation('fetch_shoot_channel', () =>
+                guild.channels.fetch(shoot.channel_id, { force: true })
+            ).catch((error) => {
                 if (error.code === 10003) return null
                 throw error
             })
             if (!channel || channel.guildId !== guild.id || channel.type !== ChannelType.GuildText) {
                 await this.store.updateShoot(shoot.id, { status: 'missing' })
-                throw new Error(uiText('shoot.missingChannel'))
+                throw Object.assign(new Error(uiText('shoot.missingChannel')), { code: 'TVM_SHOOT_CHANNEL_MISSING' })
             }
         } else {
             const topic = shootTopic(shoot.id)
-            const channels = await guild.channels.fetch()
+            const channels = await this.operation('recover_channel', () => guild.channels.fetch())
             channel = [...channels.values()].find(
                 (candidate) => candidate?.type === ChannelType.GuildText && candidate.topic === topic
             )
@@ -45,24 +50,27 @@ class ShootResources {
                         .replace(/[^a-z0-9]+/g, '-')
                         .replace(/^-|-$/g, '')
                         .slice(0, 70) || 'shoot'
-                channel = await guild.channels.create({
-                    name: `${slug}-${shoot.id.slice(0, 8)}`,
-                    type: ChannelType.GuildText,
-                    parent: this.settings.categoryId,
-                    topic,
-                    permissionOverwrites: permissions,
-                    reason: uiText('shoot.reason')
-                })
+                channel = await this.operation('create_channel', () =>
+                    guild.channels.create({
+                        name: `${slug}-${shoot.id.slice(0, 8)}`,
+                        type: ChannelType.GuildText,
+                        parent: this.settings.categoryId,
+                        topic,
+                        permissionOverwrites: permissions,
+                        reason: uiText('shoot.reason')
+                    })
+                )
             }
             await this.store.updateShoot(shoot.id, { channel_id: channel.id })
             shoot = await this.store.getShoot(shoot.id, guild.id)
         }
+        this.service.failures.update({ channelId: channel.id })
         return { channel, shoot }
     }
 
-    async fetchMessage(channel, id) {
+    async fetchMessage(channel, id, operation = 'fetch_message') {
         if (!id) return null
-        return channel.messages.fetch({ message: id, force: true }).catch((error) => {
+        return this.operation(operation, () => channel.messages.fetch({ message: id, force: true })).catch((error) => {
             if (error.code === 10008) return null
             throw error
         })
@@ -72,7 +80,7 @@ class ShootResources {
         const marker = shootMarker(shoot.id, kind)
         let before
         while (true) {
-            const page = await channel.messages.fetch({ limit: 100, before })
+            const page = await this.operation(`recover_${kind}`, () => channel.messages.fetch({ limit: 100, before }))
             const found = [...page.values()].find(
                 (message) =>
                     message.author.id === this.client.user.id &&
@@ -90,7 +98,7 @@ class ShootResources {
         // Cleanup remains final while a shoot is closed. Reopening may republish.
         if (invitation && closed && shoot.closed_at != null && Date.now() >= shoot.closed_at + 86400000) return null
         if (invitation && shoot.announcement_deleted_at != null && !republish) return null
-        let message = await this.fetchMessage(channel, shoot[column])
+        let message = await this.fetchMessage(channel, shoot[column], `fetch_${kind}`)
         if (invitation && !message && (shoot[column] || closed) && !republish) {
             // Routine synchronization honors deletion. Important events may publish
             // again; persist that intent before sending so ambiguous failures retry.
@@ -106,10 +114,12 @@ class ShootResources {
         const payload = renderShoot(invitation ? { ...shoot, announcement_deleted_at: null } : shoot, kind, closed)
         if (kind === 'brief') {
             const names = []
-            const guild = await this.client.guilds.fetch(shoot.guild_id)
+            const guild = await this.operation('fetch_guild', () => this.client.guilds.fetch(shoot.guild_id))
             for (const row of await this.store.shootParticipants(shoot.id)) {
                 if (!row.invited || row.user_id === shoot.organizer_id) continue
-                const member = await guild.members.fetch({ user: row.user_id, force: true }).catch((error) => {
+                const member = await this.operation('fetch_member', () =>
+                    guild.members.fetch({ user: row.user_id, force: true })
+                ).catch((error) => {
                     if (error.code === 10007) return null
                     throw error
                 })
@@ -130,10 +140,12 @@ class ShootResources {
                 .update(`${shoot.id}:${kind}:${shoot[column] || ''}`)
                 .digest('hex')
                 .slice(0, 24)
-            message = await channel.send({ ...payload, nonce, enforceNonce: true })
+            message = await this.operation(`send_${kind}`, () =>
+                channel.send({ ...payload, nonce, enforceNonce: true })
+            )
         } else {
             if (message.content !== payload.content || embedKey(message.embeds[0]) !== embedKey(payload.embeds[0])) {
-                await message.edit(payload)
+                await this.operation(`edit_${kind}`, () => message.edit(payload))
             }
         }
         const values = {}
@@ -143,7 +155,8 @@ class ShootResources {
             values.announcement_republish_pending = 0
         }
         if (Object.keys(values).length) await this.store.updateShoot(shoot.id, values)
-        if (kind === 'brief' && !message.pinned) await message.pin(uiText('shoot.reason'))
+        if (kind === 'brief' && !message.pinned)
+            await this.operation('pin_brief', () => message.pin(uiText('shoot.reason')))
         return message
     }
 
@@ -153,13 +166,15 @@ class ShootResources {
             !['closing', 'closed', 'missing'].includes(shoot.status)
         )
             return shoot
-        const guild = await this.client.guilds.fetch(shoot.guild_id)
-        const channel = await guild.channels.fetch(this.settings.announcementChannelId)
+        const guild = await this.operation('fetch_guild', () => this.client.guilds.fetch(shoot.guild_id))
+        const channel = await this.operation('fetch_announcement_channel', () =>
+            guild.channels.fetch(this.settings.announcementChannelId)
+        )
         if (shoot.closed_at == null) {
             if (shoot.status === 'missing') return shoot
             // Older releases did not store close times. The existing closed message
             // gives the best available date; persist it once so retries cannot reset it.
-            const message = await this.fetchMessage(channel, shoot.announcement_id)
+            const message = await this.fetchMessage(channel, shoot.announcement_id, 'fetch_invitation')
             await this.store.updateShoot(shoot.id, {
                 closed_at: message?.editedTimestamp ?? message?.createdTimestamp ?? Date.now()
             })
@@ -172,7 +187,7 @@ class ShootResources {
             if (recovered) messageIds.add(recovered.id)
         }
         for (const messageId of messageIds) {
-            await channel.messages.delete(messageId).catch((error) => {
+            await this.operation('delete_invitation', () => channel.messages.delete(messageId)).catch((error) => {
                 if (error.code !== 10008) throw error
             })
         }

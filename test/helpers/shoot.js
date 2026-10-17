@@ -31,7 +31,7 @@ const fields = (name = 'TVM film', value = '2026-10-15 13:30', location = 'Studi
     return { getTextInputValue: (key) => ({ name, date, time, location })[key], getStringSelectValues: () => [period] }
 }
 
-async function fixture(t) {
+async function fixture(t, { reporting = false, now } = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tvm-shoot-'))
     const filename = path.join(dir, 'tvm.db')
     let store = new Store(filename, 's'.repeat(32))
@@ -55,6 +55,7 @@ async function fixture(t) {
     const members = new Collection()
     const notices = []
     const errors = []
+    const logs = []
     let sequence = 500000000000000000n
     const nextId = () => String(++sequence)
     const restEmbeds = (embeds) =>
@@ -281,10 +282,24 @@ async function fixture(t) {
         productionAccessRoleId: IDS.productionRole,
         shoots: { announcementChannelId: IDS.announce, categoryId: IDS.active, archiveCategoryId: IDS.archive }
     }
-    const service = new ShootService({ client, store, config, alertAdmins: async (message) => errors.push(message) })
-    service.report = async (id, error) => {
-        errors.push({ id, error: error.message })
-    }
+    const service = new ShootService({
+        client,
+        store,
+        config,
+        now,
+        logger: {
+            error: (_prefix, value) => logs.push(JSON.parse(value)),
+            log: (_prefix, value) => logs.push(JSON.parse(value))
+        },
+        alertAdmins: async (message) => {
+            errors.push(message)
+            return true
+        }
+    })
+    if (!reporting)
+        service.report = async (id, error) => {
+            errors.push({ id, error: error.message })
+        }
     function interaction({
         command = null,
         customId = null,
@@ -377,6 +392,7 @@ async function fixture(t) {
         members,
         notices,
         errors,
+        logs,
         interaction,
         create,
         react,

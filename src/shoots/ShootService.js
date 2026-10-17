@@ -13,6 +13,8 @@ const {
 } = require('discord.js')
 const { uiText } = require('../shared/uiText')
 const ShootResources = require('./ShootResources')
+const ShootInputError = require('./ShootInputError')
+const { ShootFailureReporter } = require('./ShootFailureReporter')
 const { isBotAdmin, canManageBot } = require('../shared/permissions')
 const {
     EMOJI,
@@ -29,12 +31,13 @@ const { parseMembers, parseDetails, shootCommand, modal } = require('./forms')
 const { memberFields } = require('./render')
 
 class ShootService {
-    constructor({ client, store, config, alertAdmins }) {
+    constructor({ client, store, config, alertAdmins, logger = console, now = Date.now }) {
         this.client = client
         this.store = store
         this.config = config
         this.settings = config.shoots
         this.alertAdmins = alertAdmins
+        this.failures = new ShootFailureReporter({ alertAdmins, logger, now })
         this.locks = new Map()
         this.running = false
         this.stopped = false
@@ -55,11 +58,12 @@ class ShootService {
         })
     }
 
-    async report(id, error) {
-        console.error(`[TVM Shoot ${id}]`, error?.message || error)
-        await this.alertAdmins(
-            uiText('shoot.alert', { shootId: id, error: String(error?.message || error).slice(0, 700) })
-        )
+    report(id, error, context) {
+        return this.failures.failure(id, error, context)
+    }
+
+    operation(name, work) {
+        return this.failures.operation(name, work)
     }
 
     async initialize() {
@@ -97,7 +101,8 @@ class ShootService {
         }
         await this.reconcileAll({ republishAnnouncements: true })
         if (this.stopped) return
-        this.timer = setInterval(() => this.reconcileAll().catch((error) => this.report('reconcile', error)), 60000)
+        // reconcileAll reports its own failures, regardless of which trigger called it.
+        this.timer = setInterval(() => this.reconcileAll().catch(() => {}), 60000)
         this.timer.unref()
     }
 
@@ -120,7 +125,9 @@ class ShootService {
     }
 
     async eligible(guild, userId) {
-        const member = await guild.members.fetch({ user: userId, force: true }).catch((error) => {
+        const member = await this.operation('fetch_member', () =>
+            guild.members.fetch({ user: userId, force: true })
+        ).catch((error) => {
             if (error.code === 10007) return null
             throw error
         })
@@ -143,27 +150,57 @@ class ShootService {
         const isForm = interaction.isButton?.() && interaction.customId.startsWith('tvm:shoot:form:')
         if (!isCommand && !isModal && !isForm) return false
         if (interaction.guildId !== this.config.guildId) return true
-        try {
-            // Do not trust command defaults or a previously authorized form.
-            if (!canManageBot(interaction, this.config.adminRoleId)) {
-                await interaction.reply({ content: uiText('shoot.permission'), flags: MessageFlags.Ephemeral })
-                return true
+        await this.failures.run(
+            {
+                shootId: isModal ? interaction.customId.split(':')[3] : null,
+                channelId: interaction.channelId,
+                workflow: `command:${isCommand ? interaction.options.getSubcommand() : isModal ? 'submit' : 'form'}`,
+                trigger: 'command',
+                operation: 'command',
+                retrying: false
+            },
+            async () => {
+                try {
+                    // Do not trust command defaults or a previously authorized form.
+                    if (!canManageBot(interaction, this.config.adminRoleId)) {
+                        await interaction.reply({ content: uiText('shoot.permission'), flags: MessageFlags.Ephemeral })
+                        return true
+                    }
+                    if (!this.settings) throw new ShootInputError(uiText('shoot.disabled'))
+                    if (interaction.channel?.type !== ChannelType.GuildText)
+                        throw new ShootInputError(uiText('shoot.notText'))
+                    if (isForm)
+                        await this.operation('show_form', () => interaction.showModal(this.openForm(interaction)))
+                    else if (isModal) await this.submitModal(interaction)
+                    else await this.command(interaction)
+                    await this.failures.recovered(this.failures.context.getStore())
+                } catch (error) {
+                    const context = this.failures.context.getStore()
+                    let content
+                    if (error instanceof ShootInputError && !context.persisted) {
+                        content = uiText('admin.operationFailed', { error: error.message })
+                    } else {
+                        const reference = await this.report(context.shootId, this.failures.capture(error))
+                        content = uiText(
+                            context.persisted
+                                ? context.synchronized
+                                    ? 'shoot.confirmationFailed'
+                                    : 'shoot.syncPending'
+                                : 'shoot.actionFailed',
+                            { reference: reference || 'unavailable' }
+                        )
+                    }
+                    const payload = {
+                        content,
+                        components: [],
+                        allowedMentions: noMentions
+                    }
+                    if (interaction.deferred || interaction.replied)
+                        await interaction.editReply(payload).catch(() => {})
+                    else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {})
+                }
             }
-            if (!this.settings) throw new Error(uiText('shoot.disabled'))
-            if (interaction.channel?.type !== ChannelType.GuildText) throw new Error(uiText('shoot.notText'))
-            if (isForm) await interaction.showModal(this.openForm(interaction))
-            else if (isModal) await this.submitModal(interaction)
-            else await this.command(interaction)
-        } catch (error) {
-            await this.report(isModal ? interaction.customId.split(':')[3] : interaction.channelId, error)
-            const payload = {
-                content: uiText('admin.operationFailed', { error: String(error?.message || error).slice(0, 1500) }),
-                components: [],
-                allowedMentions: noMentions
-            }
-            if (interaction.deferred || interaction.replied) await interaction.editReply(payload).catch(() => {})
-            else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {})
-        }
+        )
         return true
     }
 
@@ -201,24 +238,26 @@ class ShootService {
             value.userId !== interaction.user.id ||
             value.channelId !== interaction.channelId
         )
-            throw new Error(uiText('shoot.expired'))
+            throw new ShootInputError(uiText('shoot.expired'))
         return modal(value.shoot, value.edit)
     }
 
     async command(interaction) {
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+        await this.operation('defer_reply', () => interaction.deferReply({ flags: MessageFlags.Ephemeral }))
         const action = interaction.options.getSubcommand()
         if (action === 'setup') {
             const invited = parseMembers(interaction.options.getString('members') || '')
             const id = crypto.randomUUID()
+            this.failures.update({ shootId: id })
             await this.store.createShootDraft(id, interaction.guildId, interaction.user.id, invited)
             await this.prepareForm(interaction, await this.store.getShoot(id, interaction.guildId))
             return
         }
         const shoot = await this.store.shootForChannel(interaction.guildId, interaction.channelId)
-        if (!shoot) throw new Error(uiText('shoot.notShoot'))
+        if (!shoot) throw new ShootInputError(uiText('shoot.notShoot'))
+        this.failures.update({ shootId: shoot.id, name: shoot.name, status: shoot.status })
         if (action === 'edit') {
-            if (!['open', 'closed'].includes(shoot.status)) throw new Error(uiText('shoot.pending'))
+            if (!['open', 'closed'].includes(shoot.status)) throw new ShootInputError(uiText('shoot.pending'))
             await this.prepareForm(interaction, shoot, true)
             return
         }
@@ -246,14 +285,17 @@ class ShootService {
                 return
             }
             if (action === 'add') {
-                if (current.status !== 'open') throw new Error(uiText('shoot.addOpenOnly'))
+                if (current.status !== 'open') throw new ShootInputError(uiText('shoot.addOpenOnly'))
                 const user = interaction.options.getUser('user', true)
                 if (!(await this.eligible(interaction.guild, user.id)))
-                    throw new Error(uiText('shoot.ineligible', { userId: user.id }))
+                    throw new ShootInputError(uiText('shoot.ineligible', { userId: user.id }))
                 const participants = await this.participantIds(current, interaction.guild)
-                if (!participants.includes(user.id) && participants.length >= 98) throw new Error(uiText('shoot.full'))
-                await this.store.inviteShootParticipant(shoot.id, user.id)
+                if (!participants.includes(user.id) && participants.length >= 98)
+                    throw new ShootInputError(uiText('shoot.full'))
+                await this.operation('save_participant', () => this.store.inviteShootParticipant(shoot.id, user.id))
+                this.failures.update({ persisted: true })
                 await this.synchronize(shoot.id)
+                this.failures.update({ synchronized: true, operation: 'send_confirmation' })
                 await interaction.editReply({
                     content: uiText('shoot.added', { userId: user.id }),
                     allowedMentions: noMentions
@@ -261,10 +303,12 @@ class ShootService {
                 return
             }
             if (action === 'remove') {
-                if (!['open', 'closed'].includes(current.status)) throw new Error(uiText('shoot.pending'))
+                if (!['open', 'closed'].includes(current.status)) throw new ShootInputError(uiText('shoot.pending'))
                 const user = interaction.options.getUser('user', true)
-                if (user.id === current.organizer_id) throw new Error(uiText('shoot.removeOrganizer'))
-                const member = await interaction.guild.members.fetch({ user: user.id, force: true }).catch((error) => {
+                if (user.id === current.organizer_id) throw new ShootInputError(uiText('shoot.removeOrganizer'))
+                const member = await this.operation('fetch_member', () =>
+                    interaction.guild.members.fetch({ user: user.id, force: true })
+                ).catch((error) => {
                     if (error.code === 10007) return null
                     throw error
                 })
@@ -273,15 +317,19 @@ class ShootService {
                     const message = await this.fetchMessage(channel, current.announcement_id)
                     // Remove the live reaction first: a stale reaction must not
                     // immediately restore membership during reconciliation.
-                    await message?.reactions.cache
-                        .get(EMOJI)
-                        ?.users.remove(user.id)
-                        .catch((error) => {
-                            if (error.code !== 10008 && error.code !== 10014) throw error
-                        })
+                    await this.operation('remove_reaction', () =>
+                        message?.reactions.cache
+                            .get(EMOJI)
+                            ?.users.remove(user.id)
+                            .catch((error) => {
+                                if (error.code !== 10008 && error.code !== 10014) throw error
+                            })
+                    )
                 }
-                await this.store.removeShootParticipant(shoot.id, user.id)
+                await this.operation('remove_participant', () => this.store.removeShootParticipant(shoot.id, user.id))
+                this.failures.update({ persisted: true })
                 await this.synchronize(shoot.id)
+                this.failures.update({ synchronized: true, operation: 'send_confirmation' })
                 await interaction.editReply({
                     content:
                         uiText('shoot.removed', { userId: user.id }) +
@@ -291,15 +339,19 @@ class ShootService {
                 return
             }
             if (action === 'close' || action === 'reopen') {
-                if (!['open', 'closed'].includes(current.status)) throw new Error(uiText('shoot.pending'))
+                if (!['open', 'closed'].includes(current.status)) throw new ShootInputError(uiText('shoot.pending'))
                 // Honor the current admission policy before changing it, including
                 // reactions added during an outage while the shoot was closed.
                 await this.reconcileReactions(current)
-                await this.store.updateShoot(shoot.id, {
-                    status: action === 'close' ? 'closing' : 'reopening',
-                    closed_at: action === 'close' ? (current.closed_at ?? Date.now()) : null
-                })
+                await this.operation('save_shoot_status', () =>
+                    this.store.updateShoot(shoot.id, {
+                        status: action === 'close' ? 'closing' : 'reopening',
+                        closed_at: action === 'close' ? (current.closed_at ?? Date.now()) : null
+                    })
+                )
+                this.failures.update({ persisted: true })
                 const result = await this.synchronize(shoot.id, { republishAnnouncement: action === 'reopen' })
+                this.failures.update({ synchronized: true, operation: 'send_confirmation' })
                 await interaction.editReply({
                     content:
                         action === 'close'
@@ -312,37 +364,47 @@ class ShootService {
     }
 
     async submitModal(interaction) {
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+        await this.operation('defer_reply', () => interaction.deferReply({ flags: MessageFlags.Ephemeral }))
         const [, , action, id, revision] = interaction.customId.split(':')
         const details = parseDetails(interaction.fields)
         await this.withLock(id, async () => {
             const shoot = await this.store.getShoot(id, interaction.guildId)
-            if (!shoot) throw new Error(uiText('shoot.expired'))
+            if (!shoot) throw new ShootInputError(uiText('shoot.expired'))
+            this.failures.update({
+                shootId: id,
+                name: shoot.name,
+                status: shoot.status,
+                channelId: shoot.channel_id || interaction.channelId
+            })
             if (action === 'setup') {
                 if (
                     shoot.status !== 'draft' ||
                     shoot.organizer_id !== interaction.user.id ||
                     Date.now() - shoot.created_at >= 30 * 60000
                 ) {
-                    throw new Error(uiText('shoot.expired'))
+                    throw new ShootInputError(uiText('shoot.expired'))
                 }
                 for (const row of await this.store.shootParticipants(id)) {
                     if (!(await this.eligible(interaction.guild, row.user_id))) {
-                        throw new Error(uiText('shoot.ineligible', { userId: row.user_id }))
+                        throw new ShootInputError(uiText('shoot.ineligible', { userId: row.user_id }))
                     }
                 }
-                await this.store.updateShoot(id, { ...details, status: 'provisioning' })
+                await this.operation('save_shoot_details', () =>
+                    this.store.updateShoot(id, { ...details, status: 'provisioning' })
+                )
             } else if (action === 'edit') {
                 if (
                     !['open', 'closed'].includes(shoot.status) ||
                     String(shoot.revision) !== revision ||
                     shoot.channel_id !== interaction.channelId
                 ) {
-                    throw new Error(uiText('shoot.expired'))
+                    throw new ShootInputError(uiText('shoot.expired'))
                 }
-                await this.store.updateShoot(id, details)
-            } else throw new Error(uiText('shoot.expired'))
+                await this.operation('save_shoot_details', () => this.store.updateShoot(id, details))
+            } else throw new ShootInputError(uiText('shoot.expired'))
+            this.failures.update({ persisted: true })
             const result = await this.synchronize(id, { republishAnnouncement: action === 'edit' })
+            this.failures.update({ synchronized: true, operation: 'send_confirmation' })
             await interaction.editReply({
                 content:
                     action === 'setup'
@@ -373,15 +435,17 @@ class ShootService {
             if (row.user_id === shoot.organizer_id || (!row.invited && !row.reacted)) continue
             if (await this.eligible(guild, row.user_id)) ids.push(row.user_id)
         }
-        if (ids.length > 98) throw new Error(uiText('shoot.full'))
+        if (ids.length > 98) throw new ShootInputError(uiText('shoot.full'), 'TVM_SHOOT_FULL')
         return ids
     }
 
     async synchronize(id, { republishAnnouncement = false } = {}) {
-        let shoot = await this.store.getShoot(id, this.config.guildId)
+        let shoot = await this.operation('load_shoot', () => this.store.getShoot(id, this.config.guildId))
+        this.failures.update({ shootId: id, name: shoot.name, status: shoot.status, channelId: shoot.channel_id })
         shoot = await this.cleanupAnnouncement(shoot)
-        if (!ACTIVE_STATUSES.includes(shoot.status)) throw new Error(uiText('shoot.missingChannel'))
-        const guild = await this.client.guilds.fetch(this.config.guildId)
+        if (!ACTIVE_STATUSES.includes(shoot.status))
+            throw Object.assign(new Error(uiText('shoot.missingChannel')), { code: 'TVM_SHOOT_CHANNEL_MISSING' })
+        const guild = await this.operation('fetch_guild', () => this.client.guilds.fetch(this.config.guildId))
         const closed = ['closing', 'closed'].includes(shoot.status)
         const participantIds = await this.participantIds(shoot, guild)
         // Member overwrites take precedence over role overwrites. Preserve archive
@@ -389,7 +453,9 @@ class ShootService {
         const writableParticipantIds = new Set()
         if (closed) {
             for (const userId of participantIds) {
-                const member = await guild.members.fetch({ user: userId, force: true }).catch((error) => {
+                const member = await this.operation('fetch_member', () =>
+                    guild.members.fetch({ user: userId, force: true })
+                ).catch((error) => {
                     if (error.code === 10007) return null
                     throw error
                 })
@@ -406,7 +472,9 @@ class ShootService {
             this.config.productionAccessRoleId,
             writableParticipantIds
         )
-        const resource = await this.resources.ensureChannel(shoot, guild, permissions)
+        const resource = await this.operation('ensure_shoot_channel', () =>
+            this.resources.ensureChannel(shoot, guild, permissions)
+        )
         const channel = resource.channel
         shoot = resource.shoot
         const parent = closed ? this.settings.archiveCategoryId : this.settings.categoryId
@@ -414,15 +482,19 @@ class ShootService {
             channel.parentId !== parent ||
             overwriteKey([...channel.permissionOverwrites.cache.values()]) !== overwriteKey(permissions)
         ) {
-            await channel.edit({
-                parent,
-                lockPermissions: false,
-                permissionOverwrites: permissions,
-                reason: uiText('shoot.reason')
-            })
+            await this.operation('update_permissions', () =>
+                channel.edit({
+                    parent,
+                    lockPermissions: false,
+                    permissionOverwrites: permissions,
+                    reason: uiText('shoot.reason')
+                })
+            )
         }
         await this.ensureMessage(channel, shoot, 'brief', 'brief_id', closed)
-        const announcementChannel = await guild.channels.fetch(this.settings.announcementChannelId)
+        const announcementChannel = await this.operation('fetch_announcement_channel', () =>
+            guild.channels.fetch(this.settings.announcementChannelId)
+        )
         const announcement = await this.ensureMessage(
             announcementChannel,
             shoot,
@@ -443,11 +515,14 @@ class ShootService {
             await this.ensureMessage(channel, shoot, 'brief', 'brief_id', closed)
             await this.ensureMessage(announcementChannel, shoot, 'invitation', 'announcement_id', closed)
         }
-        if (announcement && !closed && !announcement.reactions.cache.get(EMOJI)?.me) await announcement.react(EMOJI)
+        if (announcement && !closed && !announcement.reactions.cache.get(EMOJI)?.me)
+            await this.operation('add_join_reaction', () => announcement.react(EMOJI))
         if (['provisioning', 'closing', 'reopening'].includes(shoot.status)) {
             await this.store.updateShoot(id, { status: closed ? 'closed' : 'open' })
         }
-        return this.store.getShoot(id, guild.id)
+        const result = await this.operation('load_shoot', () => this.store.getShoot(id, guild.id))
+        this.failures.update({ status: result.status, channelId: result.channel_id })
+        return result
     }
 
     cleanupAnnouncement(...args) {
@@ -461,7 +536,9 @@ class ShootService {
         for (const type of [0, 1]) {
             let after
             while (true) {
-                const page = await reaction.users.fetch({ limit: 100, after, type })
+                const page = await this.operation('fetch_reactions', () =>
+                    reaction.users.fetch({ limit: 100, after, type })
+                )
                 for (const [id, user] of page) if (!user.bot) users.set(id, user)
                 if (page.size < 100) break
                 after = page.last().id
@@ -473,9 +550,11 @@ class ShootService {
     async reconcileReactions(shoot) {
         if (!shoot.announcement_id || shoot.announcement_deleted_at != null || !ACTIVE_STATUSES.includes(shoot.status))
             return
-        const guild = await this.client.guilds.fetch(this.config.guildId)
-        const channel = await guild.channels.fetch(this.settings.announcementChannelId)
-        const message = await this.fetchMessage(channel, shoot.announcement_id)
+        const guild = await this.operation('fetch_guild', () => this.client.guilds.fetch(this.config.guildId))
+        const channel = await this.operation('fetch_announcement_channel', () =>
+            guild.channels.fetch(this.settings.announcementChannelId)
+        )
+        const message = await this.fetchMessage(channel, shoot.announcement_id, 'fetch_invitation')
         // Deleting an invitation preserves membership. Routine sync does not republish it.
         if (!message) {
             await this.store.updateShoot(shoot.id, { announcement_deleted_at: Date.now() })
@@ -492,6 +571,7 @@ class ShootService {
             }
         }
         const accepts = joiningAllowed(shoot)
+        let cleanupFailed = false
         for (const [userId, user] of users) {
             const row = rowsById.get(userId)
             const existing = admitted.has(userId)
@@ -507,9 +587,12 @@ class ShootService {
                 // Reaction cleanup is cosmetic. A failure here must not prevent
                 // permission synchronization from revoking an ineligible member.
                 try {
-                    await message.reactions.cache.get(EMOJI).users.remove(userId)
+                    await this.operation('remove_reaction', () =>
+                        message.reactions.cache.get(EMOJI).users.remove(userId)
+                    )
                 } catch (error) {
-                    await this.report(shoot.id, error)
+                    cleanupFailed = true
+                    await this.report(shoot.id, error, { workflow: 'reaction_cleanup', retrying: true })
                     continue
                 }
                 // Notifications are best-effort; closed DMs must not prevent synchronization.
@@ -521,6 +604,33 @@ class ShootService {
                 admitted.add(userId)
             }
         }
+        if (!cleanupFailed) await this.failures.recovered({ shootId: shoot.id, workflow: 'reaction_cleanup' })
+    }
+
+    reconcileShoot(shoot, { trigger, republishAnnouncement = false }) {
+        return this.failures.run(
+            {
+                shootId: shoot.id,
+                name: shoot.name,
+                status: shoot.status,
+                channelId: shoot.channel_id,
+                workflow: 'sync',
+                trigger,
+                retrying: true
+            },
+            async () => {
+                const current = await this.operation('load_shoot', () =>
+                    this.store.getShoot(shoot.id, this.config.guildId)
+                )
+                if (!current) return
+                this.failures.update({ name: current.name, status: current.status, channelId: current.channel_id })
+                const cleaned = await this.cleanupAnnouncement(current)
+                if (!ACTIVE_STATUSES.includes(cleaned.status)) return
+                await this.reconcileReactions(cleaned)
+                await this.synchronize(shoot.id, { republishAnnouncement })
+                await this.failures.recovered({ shootId: shoot.id, workflow: 'sync' })
+            }
+        )
     }
 
     scheduleReaction(id) {
@@ -544,10 +654,7 @@ class ShootService {
             this.withLock(id, async () => {
                 do {
                     job.dirty = false
-                    const current = await this.store.getShoot(id, this.config.guildId)
-                    if (!current || !ACTIVE_STATUSES.includes(current.status)) return
-                    await this.reconcileReactions(current)
-                    await this.synchronize(id)
+                    await this.reconcileShoot({ id }, { trigger: 'reaction' })
                 } while (job.dirty)
             })
                 .then(resolve, reject)
@@ -599,7 +706,14 @@ class ShootService {
             this.reconcileRequested = true
             return this.reconciliation
         }
-        this.reconciliation = this._reconcileAll()
+        this.reconciliation = this.failures
+            .run({ shootId: 'reconcile', workflow: 'reconcile', trigger: 'scheduled', retrying: true }, () =>
+                this._reconcileAll()
+            )
+            .catch(async (error) => {
+                await this.report('reconcile', error)
+                throw error
+            })
         return this.reconciliation
     }
 
@@ -611,24 +725,25 @@ class ShootService {
                 const republishAnnouncements = this.republishRequested
                 this.republishRequested = false
                 let failed = 0
-                for (const shoot of await this.store.allShoots(this.config.guildId)) {
+                for (const shoot of await this.operation('list_shoots', () =>
+                    this.store.allShoots(this.config.guildId)
+                )) {
                     if (this.stopped) break
                     if (!ACTIVE_STATUSES.includes(shoot.status) && shoot.closed_at == null) continue
                     try {
-                        await this.withLock(shoot.id, async () => {
-                            const current = await this.cleanupAnnouncement(
-                                await this.store.getShoot(shoot.id, this.config.guildId)
-                            )
-                            if (!ACTIVE_STATUSES.includes(current.status)) return
-                            await this.reconcileReactions(current)
-                            await this.synchronize(shoot.id, { republishAnnouncement: republishAnnouncements })
-                        })
+                        await this.withLock(shoot.id, () =>
+                            this.reconcileShoot(shoot, {
+                                trigger: 'scheduled',
+                                republishAnnouncement: republishAnnouncements
+                            })
+                        )
                     } catch (error) {
                         failed++
                         await this.report(shoot.id, error)
                     }
                 }
                 if (!this.stopped && !failed) this.lastSuccessAt = Date.now()
+                await this.failures.recovered({ shootId: 'reconcile', workflow: 'reconcile' })
             } while (this.reconcileRequested && !this.stopped)
         } finally {
             this.running = false

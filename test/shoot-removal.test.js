@@ -244,7 +244,8 @@ test('reaction cleanup failure aborts before changing membership and permits a s
     const before = (await f.store.shootParticipants(shoot.id)).find((row) => row.user_id === IDS.invited)
     const interaction = removal(f, shoot, IDS.invited)
     await f.service.handleInteraction(interaction)
-    assert.match(interaction.replies.at(-1).content, /Missing Manage Messages/)
+    assert.match(interaction.replies.at(-1).content, /No changes are queued/)
+    assert.equal(f.errors.at(-1).error, 'Missing Manage Messages')
     assert.deepEqual(
         (await f.store.shootParticipants(shoot.id)).find((row) => row.user_id === IDS.invited),
         before

@@ -12,6 +12,7 @@ const {
 } = require('discord.js')
 const { assertPrivateAlertChannel } = require('../shared/channelPermissions')
 const { HealthReporter } = require('../infrastructure/HealthReporter')
+const { createAdminAlerter } = require('../infrastructure/AdminAlerts')
 const { uiText, validateUiText } = require('../shared/uiText')
 const { canManageBot } = require('../shared/permissions')
 const UnverifiedRoleManager = require('../membership/UnverifiedRoleManager')
@@ -84,22 +85,16 @@ function createApp({
         client[once ? 'once' : 'on'](event, listener)
         listeners.push([event, listener])
     }
-    const lastAlertAt = new Map()
-    async function alertAdmins(message) {
-        if (!alertReady) {
-            logger.error('[TVM] Administrator alert unavailable:', message)
-            return
-        }
-        const now = Date.now()
-        if (now - (lastAlertAt.get(message) || 0) < 5 * 60000) return
-        lastAlertAt.set(message, now)
-        try {
+    const alertAdmins = createAdminAlerter({
+        isReady: () => alertReady,
+        logger,
+        send: async (message) => {
             const channel = await client.channels.fetch(config.alertChannelId)
-            if (channel?.isTextBased()) await channel.send({ content: uiText('alerts.message', { message }) })
-        } catch (error) {
-            logger.error('[TVM] Could not send administrator alert:', error?.message || error)
+            if (!channel?.isTextBased()) return false
+            await channel.send({ content: uiText('alerts.message', { message }), allowedMentions: { parse: [] } })
+            return true
         }
-    }
+    })
     let membershipQueue = Promise.resolve()
     function withMembershipLock(work) {
         const next = membershipQueue.then(work)
@@ -114,7 +109,8 @@ function createApp({
             client,
             store: store.shoots || store,
             config,
-            alertAdmins
+            alertAdmins,
+            logger
         })
     const privateReply = (interaction, content, components = []) => interaction.editReply({ content, components })
     const roleIds = configuredRoleIds(config)
