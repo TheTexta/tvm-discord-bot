@@ -2,6 +2,7 @@
 'use strict'
 const test = require('node:test')
 const assert = require('node:assert/strict')
+const { Collection, PermissionsBitField } = require('discord.js')
 const { fixture, IDS } = require('./helpers/shoot')
 
 test('shoot form preparation defers before database waits and its button needs no database reads', async (t) => {
@@ -92,4 +93,61 @@ test('shutdown flushes accepted reaction work and removes pending timers', async
     await f.service.drain()
     await job
     assert.equal(f.service.reactionJobs.size, 0)
+})
+
+test('22-person open and archived passes fetch each member once and refresh on the next pass', async (t) => {
+    const f = await fixture(t)
+    const { shoot } = await f.create()
+    for (let i = 0; i < 20; i++) {
+        const id = String(800000000000000000n + BigInt(i))
+        f.members.set(id, {
+            id,
+            user: { id, bot: false, username: `crew-${i}` },
+            roles: { cache: new Collection([[IDS.memberRole, { id: IDS.memberRole }]]) },
+            permissions: new PermissionsBitField(0n)
+        })
+        await f.store.inviteShootParticipant(shoot.id, id)
+    }
+    const originalFetch = f.guild.members.fetch
+    const fetched = []
+    f.guild.members.fetch = async (options) => {
+        assert.equal(options.force, true)
+        fetched.push(options.user)
+        return originalFetch(options)
+    }
+    await f.service.reconcileAll()
+    assert.equal(fetched.length, 21)
+    assert.equal(new Set(fetched).size, fetched.length)
+    await f.service.handleInteraction(f.interaction({ command: 'close', channelId: shoot.channel_id }))
+    fetched.length = 0
+    await f.service.reconcileAll()
+    assert.equal(fetched.length, 22)
+    assert.equal(new Set(fetched).size, fetched.length)
+    f.members.get(IDS.invited).roles.cache.clear()
+    fetched.length = 0
+    await f.service.reconcileAll()
+    assert.ok(fetched.includes(IDS.invited))
+    assert.equal(f.channels.get(shoot.channel_id).permissionOverwrites.cache.has(IDS.invited), false)
+    assert.equal(f.errors.length, 0)
+})
+
+test('member lookup reuse isolates concurrent shoots, retries fetch errors and remembers absence only within a pass', async (t) => {
+    const f = await fixture(t)
+    const originalFetch = f.guild.members.fetch
+    let requests = 0
+    f.guild.members.fetch = async (options) => {
+        if (++requests === 1) throw new Error('temporary failure')
+        return originalFetch(options)
+    }
+    const first = f.service.membersForPass(f.guild)
+    await assert.rejects(first(IDS.invited), /temporary/)
+    await Promise.all([first(IDS.invited), first(IDS.invited)])
+    assert.equal(requests, 2)
+    await f.service.membersForPass(f.guild)(IDS.invited)
+    assert.equal(requests, 3)
+    f.members.delete(IDS.invited)
+    const absent = f.service.membersForPass(f.guild)
+    assert.equal(await absent(IDS.invited), null)
+    assert.equal(await absent(IDS.invited), null)
+    assert.equal(requests, 4)
 })

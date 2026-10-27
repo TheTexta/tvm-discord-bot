@@ -192,6 +192,77 @@ test('shutdown has a deadline when an external operation does not finish', async
     await request
 })
 
+test('a generically acknowledged verification delivery remains tracked through shutdown', async () => {
+    const sending = deferred(),
+        delivered = deferred()
+    const order = []
+    const f = fixture({
+        store: {
+            async status() {
+                return { meta: { version: 1 }, count: 1 }
+            },
+            async allowRequest() {
+                return true
+            },
+            async lookup() {
+                return { email: 'member@example.org' }
+            },
+            async reserveSend() {
+                return true
+            },
+            async savePending() {},
+            async close() {
+                order.push('store')
+            }
+        },
+        mail: {
+            async sendMail() {
+                sending.resolve()
+                await delivered.promise
+                order.push('delivered')
+            },
+            close() {
+                order.push('mail')
+            }
+        }
+    })
+    await f.app.start()
+    const interaction = f.interaction(null)
+    const request = f.handle(interaction)
+    await sending.promise
+    assert.match(interaction.replies[0].content, /If this email is on/)
+    const shutdown = f.app.shutdown()
+    assert.deepEqual(order, [])
+    delivered.resolve()
+    await Promise.all([request, shutdown])
+    assert.deepEqual(order, ['delivered', 'mail', 'store'])
+})
+
+test('runtime preserves SMTP acceptance when only the administrator confirmation fails', async (t) => {
+    let sends = 0
+    const f = fixture({
+        mail: {
+            async sendMail() {
+                sends++
+            },
+            close() {}
+        }
+    })
+    t.after(() => f.app.shutdown())
+    await f.app.start()
+    const interaction = f.interaction('testmail')
+    let edits = 0
+    interaction.editReply = async (payload) => {
+        if (++edits === 1) throw new Error('confirmation expired')
+        interaction.replies.push(payload)
+    }
+    await f.handle(interaction)
+    assert.equal(sends, 1)
+    assert.match(interaction.replies[0].content, /action was accepted.*confirmation could not be delivered/)
+    assert.match(interaction.replies[0].content, /SMTP accepted/)
+    assert.doesNotMatch(interaction.replies[0].content, /Couldn't complete/)
+})
+
 test(
     'slow verification delivery allows reconciliation and never revives codes invalidated by a roster change',
     { timeout: 2000 },

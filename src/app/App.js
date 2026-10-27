@@ -15,12 +15,13 @@ const { HealthReporter } = require('../infrastructure/HealthReporter')
 const { createAdminAlerter } = require('../infrastructure/AdminAlerts')
 const { uiText, validateUiText } = require('../shared/uiText')
 const { canManageBot } = require('../shared/permissions')
+const { AdminOperationError, withAdminOperation } = require('../shared/AdminOperation')
 const UnverifiedRoleManager = require('../membership/UnverifiedRoleManager')
 const { ShootService } = require('../shoots/ShootService')
 const { buildCommands } = require('./commands')
 const { createMembershipService } = require('../membership/MembershipService')
 const { createVerificationService } = require('../membership/VerificationService')
-const { createRosterCommands } = require('../membership/RosterCommands')
+const { createRosterCommands, previewButtons } = require('../membership/RosterCommands')
 const { roleKinds, configuredRoleIds } = require('../membership/roles')
 const { normalizeEmail, validEmail } = require('../shared/validation')
 const { modal: shootModal } = require('../shoots/forms')
@@ -44,6 +45,7 @@ function createApp({
     emailModal().toJSON()
     codeModal().toJSON()
     codeRow().toJSON()
+    previewButtons('validation', true).toJSON()
     buildCommands(true)
     shootModal({ id: 'validation', revision: 0, name: '', location: '', call_time: null, join_period: 'day' }).toJSON()
     shootModal(
@@ -151,7 +153,12 @@ function createApp({
             }
         })
     }
-    const { uploadRoster, handleRoster } = createRosterCommands({
+    const {
+        uploadRoster,
+        handleRoster,
+        handleUploadButton,
+        stop: stopRosterCommands
+    } = createRosterCommands({
         config,
         store: store.membership || store,
         withMembershipLock,
@@ -311,6 +318,7 @@ function createApp({
             }
             if (await shoots.handleInteraction(interaction)) return
             if (interaction.isButton()) {
+                if (await handleUploadButton(interaction)) return
                 if (interaction.customId === 'tvm:verify') return await interaction.showModal(emailModal())
                 if (interaction.customId === 'tvm:open-code') return await interaction.showModal(codeModal())
                 return
@@ -329,46 +337,60 @@ function createApp({
             if (interaction.commandName === 'upload') return await uploadRoster(interaction)
             if (interaction.commandName === 'roster') return await handleRoster(interaction)
             if (interaction.commandName === 'postverify') {
-                await interaction.reply({ content: uiText('verification.posting'), flags: MessageFlags.Ephemeral })
-                await interaction.channel.send({
-                    content: uiText('verification.post', {
-                        memberRole: roleNames.member,
-                        execRole: roleNames.exec,
-                        adminRole: roleNames.admin
-                    }),
-                    components: [
-                        new ActionRowBuilder().addComponents(
-                            new ButtonBuilder()
-                                .setCustomId('tvm:verify')
-                                .setLabel(uiText('buttons.verify'))
-                                .setStyle(ButtonStyle.Success)
-                        )
-                    ]
+                return await withAdminOperation(async (operation) => {
+                    await interaction.reply({ content: uiText('verification.posting'), flags: MessageFlags.Ephemeral })
+                    await interaction.channel.send({
+                        content: uiText('verification.post', {
+                            memberRole: roleNames.member,
+                            execRole: roleNames.exec,
+                            adminRole: roleNames.admin
+                        }),
+                        components: [
+                            new ActionRowBuilder().addComponents(
+                                new ButtonBuilder()
+                                    .setCustomId('tvm:verify')
+                                    .setLabel(uiText('buttons.verify'))
+                                    .setStyle(ButtonStyle.Success)
+                            )
+                        ]
+                    })
+                    operation.completed()
+                    await operation.confirm(uiText('admin.verificationPosted'), (content) =>
+                        privateReply(interaction, content)
+                    )
                 })
-                return
             }
             if (interaction.commandName === 'testmail') {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral })
-                const email = normalizeEmail(interaction.options.getString('email'))
-                if (!validEmail(email)) throw new Error(uiText('errors.invalidDestination'))
-                await mail.sendMail({
-                    fromName: uiText('email.fromName'),
-                    to: email,
-                    subject: uiText('email.testSubject'),
-                    text: uiText('email.testBody')
+                return await withAdminOperation(async (operation) => {
+                    await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+                    const email = normalizeEmail(interaction.options.getString('email'))
+                    if (!validEmail(email)) throw new Error(uiText('errors.invalidDestination'))
+                    await mail.sendMail({
+                        fromName: uiText('email.fromName'),
+                        to: email,
+                        subject: uiText('email.testSubject'),
+                        text: uiText('email.testBody')
+                    })
+                    operation.completed()
+                    await operation.confirm(uiText('admin.testmailSent'), (content) =>
+                        privateReply(interaction, content)
+                    )
                 })
-                await privateReply(interaction, uiText('admin.testmailSent'))
             }
         } catch (error) {
             logger.error('[TVM] Interaction failed:', error?.message || error)
             const adminOperation =
-                interaction.isChatInputCommand() &&
-                interaction.commandName !== 'verify' &&
-                interaction.commandName !== 'source'
+                interaction.customId?.startsWith('tvm:roster:') ||
+                (interaction.isChatInputCommand() &&
+                    interaction.commandName !== 'verify' &&
+                    interaction.commandName !== 'source')
             if (!adminOperation) await alertAdmins(uiText('alerts.interactionFailed'))
-            const message = adminOperation
-                ? uiText('admin.operationFailed', { error: String(error?.message || error).slice(0, 1500) })
-                : uiText('verification.failed')
+            const message =
+                error instanceof AdminOperationError
+                    ? error.message
+                    : adminOperation
+                      ? uiText('admin.operationFailed', { error: String(error?.message || error).slice(0, 1500) })
+                      : uiText('verification.failed')
             if (interaction.deferred || interaction.replied)
                 await interaction.editReply({ content: message, components: [] }).catch(() => {})
             else await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {})
@@ -392,6 +414,7 @@ function createApp({
         clearInterval(membershipTimer)
         shoots.stop()
         membership.stop()
+        stopRosterCommands()
         for (const [event, listener] of listeners) client.off(event, listener)
         let timer
         const drain = (async () => {

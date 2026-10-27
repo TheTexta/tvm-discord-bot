@@ -24,6 +24,9 @@ class Store extends SqliteDatabase {
     replaceRoster(...args) {
         return this.membership.replaceRoster(...args)
     }
+    previewRoster(...args) {
+        return this.membership.previewRoster(...args)
+    }
     allowRequest(...args) {
         return this.membership.allowRequest(...args)
     }

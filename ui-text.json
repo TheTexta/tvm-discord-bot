@@ -4,7 +4,7 @@
         "source": "Check out the verification bot's source code",
         "postverify": "Post the TVM verification button in this channel",
         "testmail": "Send a test verification email through Resend",
-        "upload": "Upload a CSV to update the TVM member list and roles",
+        "upload": "Preview and confirm a complete replacement of the TVM member list",
         "roster": "Manage the TVM member list",
         "status": "Check the current TVM member list",
         "audit": "View recent member list updates and account transfers",
@@ -19,7 +19,9 @@
     },
     "buttons": {
         "verify": "Verify your TVM membership",
-        "enterCode": "Enter your code"
+        "enterCode": "Enter your code",
+        "confirmRoster": "Replace entire roster",
+        "cancelRoster": "Cancel replacement"
     },
     "modals": {
         "emailTitle": "Verify your TVM membership",
@@ -61,6 +63,17 @@
     "admin": {
         "permissionRequired": "You'll need the Admin Team role or Discord Administrator permission to use this command.",
         "uploadComplete": "Accepted roster snapshot v{version}: {count} emails ({uploaded} rows). Added: {added}; omitted: {omitted}; tier changes: {changed}. Discord synchronization is queued; use /roster status for progress. Pre-existing roles are protected.",
+        "uploadPreview": "Preview against roster v{version}: {count} emails. Added: {added}; omitted: {omitted}; tier changes: {changed}, including {demoted} demotions.\n\nNothing has changed yet. This replaces the ENTIRE roster, not a merge. Omitted emails lose eligibility and obsolete bot-owned roles will be removed; pre-existing roles remain protected. Confirm only if this CSV is the complete current roster. This preview expires in 10 minutes, on restart, or when the roster changes.",
+        "previewExpired": "This roster preview expired, was already used, or belongs to another admin/channel. Upload the complete CSV again to preview it.",
+        "previewStale": "The roster changed after this preview. Nothing from this preview was applied. Upload the complete CSV again and review the new differences.",
+        "previewCancelled": "Roster replacement cancelled. This preview made no changes.",
+        "previewBusy": "Too many roster previews are pending. Cancel one or wait 10 minutes, then upload again.",
+        "confirmationFailed": "The action was accepted, but its confirmation could not be delivered. Do not repeat it just to obtain a reply. Result: {result}",
+        "completedWithoutConfirmation": "The action completed, but its confirmation could not be delivered. Do not repeat it just to obtain a reply.",
+        "syncPending": "The membership change or existing link is saved, but Discord synchronization is pending. {nextSteps}",
+        "reconcileNextSteps": "Use /roster status to check progress and /roster reconcile to retry synchronization. Do not repeat a saved release or transfer.",
+        "repairNextSteps": "The verified link is retained. Use /roster repair or /roster reconcile to retry its roles, rather than repeating a transfer.",
+        "verificationPosted": "Verification button posted.",
         "status": "Active roster: {count} emails (version {version}). {mode}\nInactive links: {unreconciled}.\nSynchronization: {sync}\nHealth: {health}",
         "noRoster": "There's no active TVM member list yet. Verification is closed.",
         "auditEntry": "{timestamp} • {action} • by {actor} • {detail}",

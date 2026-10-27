@@ -22,7 +22,7 @@
         "csv-parse": "^7.0.3",
         "discord.js": "^14.25.1",
         "luxon": "^3.7.2",
-        "nodemailer": "^10.0.13",
+        "nodemailer": "^10.1.4",
         "sqlite3": "^6.0.1"
     },
     "devDependencies": {

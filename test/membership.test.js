@@ -136,6 +136,55 @@ test('partial transfer failure restores the old roles and retains the original c
     assert.deepEqual([...f.live.get('target')], [])
 })
 
+test('release and transfer confirmation failures preserve the completed identity change', async (t) => {
+    for (const action of ['release', 'transfer']) {
+        const f = await fixture(t)
+        const commands = createRosterCommands({
+            config: f.config,
+            store: f.store,
+            membership: f.membership,
+            unverifiedRoles: { async syncMember() {} },
+            withMembershipLock: (work) => work(),
+            scheduleReconciliation: async () => {},
+            alertAdmins: async () => {},
+            privateReply: async () => {
+                throw new Error('confirmation lost')
+            }
+        })
+        await assert.rejects(
+            commands.handleRoster(f.interaction(action)),
+            /action was accepted.*confirmation could not be delivered/
+        )
+        const claim = await f.store.claimFor('guild', 'old@example.org')
+        assert.equal(claim?.user_id, action === 'release' ? undefined : 'target')
+    }
+})
+
+test('a persisted transfer with failed role assignment reports pending synchronization and queues repair', async (t) => {
+    const f = await fixture(t)
+    let queued = 0
+    const commands = createRosterCommands({
+        config: f.config,
+        store: f.store,
+        membership: {
+            ...f.membership,
+            async addMissingRoles() {
+                throw new Error('Discord unavailable')
+            }
+        },
+        unverifiedRoles: {},
+        withMembershipLock: (work) => work(),
+        scheduleReconciliation: async () => {
+            queued++
+        },
+        alertAdmins: async () => {},
+        privateReply: async () => {}
+    })
+    await assert.rejects(commands.handleRoster(f.interaction('transfer')), /saved.*synchronization is pending/)
+    assert.equal((await f.store.claimFor('guild', 'old@example.org')).user_id, 'target')
+    assert.equal(queued, 1)
+})
+
 test('reconciliation refreshes removed claims before revoking roles', async (t) => {
     const f = await fixture(t)
     await f.store.replaceRoster('guild', [{ email: 'other@example.org', role: 'gm' }], 'admin')
@@ -287,7 +336,7 @@ test('a newer snapshot can commit between accounts and supersedes queued tier ch
     assert.equal(service.status().version, (await f.store.status('guild')).meta.version)
 })
 
-test('overlapping uploads commit in arrival order and invalid uploads preserve the authoritative snapshot', async (t) => {
+test('overlapping uploads prepare previews in arrival order without changing the authoritative snapshot', async (t) => {
     const f = await fixture(t)
     let release, started
     const gate = new Promise((resolve) => {
@@ -353,15 +402,15 @@ test('overlapping uploads commit in arrival order and invalid uploads preserve t
     assert.deepEqual(fetched, ['first'])
     release()
     await Promise.all([one, two])
-    assert.deepEqual(await f.store.rosterEntries('guild'), [{ email: 'second@example.org', role: 'gm' }])
-    assert.match(second.content, /synchronization is queued/)
+    assert.deepEqual(await f.store.rosterEntries('guild'), [{ email: 'old@example.org', role: 'exec' }])
+    assert.match(second.content, /Nothing has changed yet/)
     const before = await f.store.status('guild')
     await assert.rejects(commands.uploadRoster(upload('invalid')), /Role|role/)
     assert.deepEqual(await f.store.status('guild'), before)
-    assert.deepEqual(await f.store.rosterEntries('guild'), [{ email: 'second@example.org', role: 'gm' }])
+    assert.deepEqual(await f.store.rosterEntries('guild'), [{ email: 'old@example.org', role: 'exec' }])
 })
 
-test('successful SMTP followed by a failed Discord reply never reports delivery failure', async (t) => {
+test('failed generic acknowledgement never looks up eligibility, saves a code, or sends SMTP', async (t) => {
     const f = await fixture(t)
     const alerts = [],
         logs = []
@@ -370,7 +419,11 @@ test('successful SMTP followed by a failed Discord reply never reports delivery 
         store: f.store,
         membership: f.membership,
         withMembershipLock: (work) => work(),
-        mail: { async sendMail() {} },
+        mail: {
+            async sendMail() {
+                assert.fail('SMTP must follow acknowledgement')
+            }
+        },
         privateReply: async () => {
             throw new Error('Discord reply expired')
         },
@@ -387,7 +440,7 @@ test('successful SMTP followed by a failed Discord reply never reports delivery 
     )
     assert.deepEqual(alerts, [])
     assert.deepEqual(logs, [])
-    assert.ok(await f.store.pendingFor('guild', 'target'))
+    assert.equal(await f.store.pendingFor('guild', 'target'), undefined)
 })
 
 test('a reopened database retries failed role removal without recreating an omitted identity', async (t) => {

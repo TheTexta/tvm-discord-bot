@@ -31,31 +31,36 @@ Upload a CSV with `Email,Role` headers. Accepted roles are `GM`, `Exec - Editor`
 npm run roster:check -- /path/to/eligible-members.csv
 ```
 
-Each accepted upload replaces the complete active roster. Omitted emails lose roster eligibility; changed tiers remove obsolete bot-owned roles. Roles assigned before bot management remain protected independently for GM, Exec, and Admin. Inactive account links are retained, so a returning email automatically regains its current tier without another verification challenge. The retired `TVM_AUTO_ROLE_REVOCATION` setting is ignored. `Unverified` is assigned only to humans with no other roles.
+`/upload` first shows a private preview of additions, omissions, tier changes, and demotions. Nothing changes until the same authorized admin clicks **Replace entire roster** in the same channel. The preview expires after 10 minutes, a restart, another preview by that admin, or an intervening roster replacement. Cancel discards it. Review omissions carefully: this is not a merge.
 
-Existing databases start in transition mode: their merged roster and existing roles are preserved until the first complete CSV upload. `/roster status` shows whether snapshot control is active. Back up before upgrading, then upload the complete current roster. Upload replies confirm database acceptance; Discord synchronization runs in the background and reports progress, protected roles, and failures through `/roster status`. Invalid uploads leave the active snapshot unchanged.
+Each confirmed replacement replaces the complete active roster. Omitted emails lose roster eligibility; changed tiers remove obsolete bot-owned roles. Roles assigned before bot management remain protected independently for GM, Exec, and Admin. Inactive account links are retained, so a returning email automatically regains its current tier without another verification challenge. The retired `TVM_AUTO_ROLE_REVOCATION` setting is ignored. `Unverified` is assigned only to humans with no other roles.
+
+Existing databases start in transition mode: their merged roster and existing roles are preserved until the first confirmed complete CSV replacement. `/roster status` shows whether snapshot control is active. Back up before upgrading, then upload and confirm the complete current roster. The confirmation reply reports database acceptance; Discord synchronization runs in the background and reports progress, protected roles, and failures through `/roster status`. Invalid, cancelled, expired, or stale previews leave the active snapshot unchanged. A failed confirmation delivery does not undo an accepted action; do not repeat saved releases or transfers merely to get a reply.
+
+Verification replies are generic and sent before eligibility lookup or email delivery. An SMTP failure never changes that reply; operators receive a private alert. The reply does not guarantee inbox delivery.
 
 ## Common commands
 
 Management commands require the configured Admin Team role or Discord Administrator permission. The manually assigned `all production access` role controls visibility and participation across all shoots, Broadcast, and Post Credits; Admin Team alone does not grant that visibility. Admins retain access to shoots they organize or join.
 
-| Command                                                                                                      | Purpose                                     |
-| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
-| `/verify`                                                                                                    | Request a code for your roster email.       |
-| `/source`                                                                                                    | Open this bot’s source repository.          |
-| `/upload`                                                                                                    | Merge an eligible-member CSV.               |
-| `/postverify`                                                                                                | Publish the verification button.            |
-| `/testmail`                                                                                                  | Send a delivery test to a controlled inbox. |
-| `/roster status`, `/roster audit`                                                                            | Inspect roster status and changes.          |
-| `/roster reconcile`, `/roster repair`                                                                        | Retry membership role synchronization.      |
-| `/roster transfer`, `/roster release`                                                                        | Move or release a verified account claim.   |
-| `/shoot setup`, `/shoot edit`, `/shoot crew`, `/shoot add`, `/shoot remove`, `/shoot close`, `/shoot reopen` | Manage private shoot chats when configured. |
+| Command                                                                                                      | Purpose                                            |
+| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| `/verify`                                                                                                    | Request a code for your roster email.              |
+| `/source`                                                                                                    | Open this bot’s source repository.                 |
+| `/upload`                                                                                                    | Preview and confirm a complete roster replacement. |
+| `/postverify`                                                                                                | Publish the verification button.                   |
+| `/testmail`                                                                                                  | Send a delivery test to a controlled inbox.        |
+| `/roster status`, `/roster audit`                                                                            | Inspect roster status and changes.                 |
+| `/roster reconcile`, `/roster repair`                                                                        | Retry membership role synchronization.             |
+| `/roster transfer`, `/roster release`                                                                        | Move or release a verified account claim.          |
+| `/shoot setup`, `/shoot edit`, `/shoot crew`, `/shoot add`, `/shoot remove`, `/shoot close`, `/shoot reopen` | Manage private shoot chats when configured.        |
 
 ## Operator and contributor guides
 
 - [Shoot setup, joining, and archival](docs/shoots.md)
 - [Deployment, backups, recovery, and secret rotation](docs/operations.md)
 - [Development and runtime boundaries](docs/development.md)
+- [Expanded permission diagnostics investigation](docs/permission-diagnostics.md)
 - [Contributing](CONTRIBUTING.md) and [security reporting](SECURITY.md)
 
 Edit `ui-text.json` to change wording, keeping its keys and placeholders intact. Restart or redeploy after editing; publish the updated verification post with `/postverify`. Recovery identifiers are fixed in code. Startup rejects invalid message keys, placeholders, and component lengths.

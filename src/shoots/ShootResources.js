@@ -92,7 +92,7 @@ class ShootResources {
         }
     }
 
-    async ensureMessage(channel, shoot, kind, column, closed, republishAnnouncement = false) {
+    async ensureMessage(channel, shoot, kind, column, closed, republishAnnouncement = false, members) {
         const invitation = kind === 'invitation'
         const republish = republishAnnouncement || Boolean(shoot.announcement_republish_pending)
         // Cleanup remains final while a shoot is closed. Reopening may republish.
@@ -115,14 +115,10 @@ class ShootResources {
         if (kind === 'brief') {
             const names = []
             const guild = await this.operation('fetch_guild', () => this.client.guilds.fetch(shoot.guild_id))
+            members ||= this.service.membersForPass(guild)
             for (const row of await this.store.shootParticipants(shoot.id)) {
                 if (!row.invited || row.user_id === shoot.organizer_id) continue
-                const member = await this.operation('fetch_member', () =>
-                    guild.members.fetch({ user: row.user_id, force: true })
-                ).catch((error) => {
-                    if (error.code === 10007) return null
-                    throw error
-                })
+                const member = await members(row.user_id)
                 const name =
                     member?.displayName ||
                     member?.user.globalName ||

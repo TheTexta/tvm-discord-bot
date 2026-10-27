@@ -42,4 +42,18 @@ function parseRoster(csv) {
     })
 }
 
-module.exports = { parseRoster }
+function rosterChanges(previous, rows) {
+    const before = new Map(previous.map((row) => [row.email, row.role]))
+    const after = new Map(rows.map((row) => [row.email, row.role]))
+    const tier = { gm: 0, exec: 1, admin: 2 }
+    return {
+        count: rows.length,
+        uploaded: rows.length,
+        added: rows.filter((row) => !before.has(row.email)).length,
+        changed: rows.filter((row) => before.has(row.email) && before.get(row.email) !== row.role).length,
+        omitted: previous.filter((row) => !after.has(row.email)).length,
+        demoted: rows.filter((row) => before.has(row.email) && tier[row.role] < tier[before.get(row.email)]).length
+    }
+}
+
+module.exports = { parseRoster, rosterChanges }

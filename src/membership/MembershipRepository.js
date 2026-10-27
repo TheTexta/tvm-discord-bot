@@ -6,6 +6,7 @@ const crypto = require('node:crypto')
 const { uiText } = require('../shared/uiText')
 const { normalizeEmail, validEmail } = require('../shared/validation')
 const { rosterRoles, managedColumns } = require('./roles')
+const { rosterChanges } = require('./roster')
 
 class MembershipRepository extends Repository {
     constructor(database, codeSecret) {
@@ -48,7 +49,14 @@ class MembershipRepository extends Repository {
             ])
         )
     }
-    replaceRoster(guildId, rows, adminId) {
+    previewRoster(guildId, rows) {
+        return this._locked(async () => {
+            const meta = await this._get('SELECT version FROM email_roster_meta WHERE guild_id = ?', [guildId])
+            const before = await this._all('SELECT email, role FROM email_roster WHERE guild_id = ?', [guildId])
+            return { version: meta?.version || 0, ...rosterChanges(before, rows) }
+        })
+    }
+    replaceRoster(guildId, rows, adminId, { expectedVersion } = {}) {
         return this._locked(async () => {
             if (!Array.isArray(rows) || rows.length === 0) throw new Error(uiText('errors.emptyRoster'))
             if (rows.length > 10000) throw new Error(uiText('errors.rosterRows'))
@@ -60,6 +68,9 @@ class MembershipRepository extends Repository {
                 throw new Error(uiText('errors.rosterInvalidRole'))
             return this._transaction(async () => {
                 const previous = await this._get('SELECT version FROM email_roster_meta WHERE guild_id = ?', [guildId])
+                if (expectedVersion !== undefined && expectedVersion !== (previous?.version || 0)) {
+                    throw Object.assign(new Error(uiText('admin.previewStale')), { code: 'TVM_ROSTER_STALE' })
+                }
                 const before = new Map(
                     (await this._all('SELECT email, role FROM email_roster WHERE guild_id = ?', [guildId])).map(
                         (row) => [row.email, row.role]
